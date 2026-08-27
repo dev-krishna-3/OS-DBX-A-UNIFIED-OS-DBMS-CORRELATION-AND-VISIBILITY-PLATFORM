@@ -650,3 +650,29 @@ This table represents a performance observation associated with a trace.
 
 Result
 3NF / analytical event design ✅
+
+Table                     1NF    2NF    3NF
+------------------------------------------------
+users                     ✓      ✓      ✓
+processes                 ✓      ✓      ✓
+threads                   ✓      ✓      ✓
+system_calls              ✓      ✓      ✓
+os_events                 ✓      ✓      ✓
+files                     ✓      ✓      ✓
+file_events               ✓      ✓      ✓
+file_permissions          ✓      ✓      ✓
+system_metrics            ✓      ✓      ✓
+simulations               ✓      ✓      ✓
+simulation_runs           ✓      ✓      ✓
+transactions              ✓      ✓      ✓
+transaction_operations    ✓      ✓      ✓
+query_executions          ✓      ✓      ✓
+locks                     ✓      ✓      ✓
+schedules                 ✓      ✓      ✓
+schedule_operations       ✓      ✓      ✓
+recovery_logs             ✓      ✓      ✓
+checkpoints               ✓      ✓      *
+cross_layer_traces        ✓      ✓      ✓
+event_correlations        ✓      ✓      ✓
+incidents                 ✓      ✓      ✓
+performance_records       ✓      ✓      ✓
