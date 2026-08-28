@@ -220,3 +220,176 @@ CREATE TABLE synchronization_experiments (
         FOREIGN KEY (simulation_id)
         REFERENCES simulations(simulation_id)
 );
+
+
+#TRANSACTIONS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE transactions (
+    transaction_id INT AUTO_INCREMENT PRIMARY KEY,
+    pid BIGINT NOT NULL,
+    status VARCHAR(50),
+    start_time DATETIME,
+    end_time DATETIME,
+    isolation_level VARCHAR(100),
+
+    CONSTRAINT fk_transaction_process
+        FOREIGN KEY (pid)
+        REFERENCES processes(pid)
+);
+
+#TRANSACTION_OPERATIONS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE transaction_operations (
+    operation_id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT NOT NULL,
+    operation_type VARCHAR(50),
+    data_item VARCHAR(255),
+    sequence_no INT,
+    timestamp DATETIME,
+
+    CONSTRAINT fk_transaction_operation_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id)
+);
+
+#QUERY_EXECUTION TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE query_executions (
+    query_id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT NOT NULL,
+    pid BIGINT NOT NULL,
+    query_type VARCHAR(50),
+    query_text TEXT,
+    execution_time_ms FLOAT,
+    rows_affected INT,
+    status VARCHAR(50),
+    timestamp DATETIME,
+
+    CONSTRAINT fk_query_execution_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id),
+
+    CONSTRAINT fk_query_execution_process
+        FOREIGN KEY (pid)
+        REFERENCES processes(pid)
+);
+
+#LOCKS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE locks (
+    lock_id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT NOT NULL,
+    data_item VARCHAR(255),
+    lock_type VARCHAR(50),
+    status VARCHAR(50),
+    acquired_at DATETIME,
+    released_at DATETIME,
+
+    CONSTRAINT fk_lock_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id)
+);
+
+#SCHEDULES TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE schedules (
+    schedule_id INT AUTO_INCREMENT PRIMARY KEY,
+    description TEXT,
+    is_serializable BOOLEAN,
+    created_at DATETIME
+);
+
+#SCHEDULE_OPERATIONS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE schedule_operations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    schedule_id INT,
+    operation_id INT,
+    position INT
+);
+
+#RECOVERY_LOGS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE recovery_logs (
+    log_id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT,
+    log_type VARCHAR(50),
+    data_item VARCHAR(255),
+    old_value VARCHAR(1000),
+    new_value VARCHAR(1000),
+    timestamp DATETIME,
+
+    CONSTRAINT fk_recovery_log_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id)
+);
+
+#CHECKPOINTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE checkpoints (
+    checkpoint_id INT AUTO_INCREMENT PRIMARY KEY,
+    timestamp DATETIME,
+    active_transactions TEXT
+);
+
+#CROSS_LAYER_TRACES TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE cross_layer_traces (
+    trace_id INT AUTO_INCREMENT PRIMARY KEY,
+    pid BIGINT,
+    transaction_id INT,
+    status VARCHAR(50),
+    started_at DATETIME,
+    ended_at DATETIME,
+    summary TEXT,
+
+    CONSTRAINT fk_trace_process
+        FOREIGN KEY (pid)
+        REFERENCES processes(pid),
+
+    CONSTRAINT fk_trace_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id)
+);
+
+#EVENT_CORRELATIONS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE event_correlations (
+    correlation_id INT AUTO_INCREMENT PRIMARY KEY,
+    trace_id INT,
+    os_event_id INT,
+    db_event_id INT,
+    query_id INT,
+    correlation_method VARCHAR(100),
+    confidence_score FLOAT,
+    sequence_order INT,
+
+    CONSTRAINT fk_correlation_trace
+        FOREIGN KEY (trace_id)
+        REFERENCES cross_layer_traces(trace_id),
+
+    CONSTRAINT fk_correlation_os_event
+        FOREIGN KEY (os_event_id)
+        REFERENCES os_events(event_id),
+
+    CONSTRAINT fk_correlation_query
+        FOREIGN KEY (query_id)
+        REFERENCES query_executions(query_id)
+);
+
+#INCIDENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE incidents (
+    incident_id INT AUTO_INCREMENT PRIMARY KEY,
+    trace_id INT,
+    incident_type VARCHAR(100),
+    description TEXT,
+    detected_at DATETIME,
+    resolved BOOLEAN,
+
+    CONSTRAINT fk_incident_trace
+        FOREIGN KEY (trace_id)
+        REFERENCES cross_layer_traces(trace_id)
+);
+
+#PERFORMANCE_RECORDS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE performance_records (
+    record_id INT AUTO_INCREMENT PRIMARY KEY,
+    trace_id INT,
+    metric_name VARCHAR(100),
+    metric_value FLOAT,
+    recorded_at DATETIME,
+
+    CONSTRAINT fk_performance_record_trace
+        FOREIGN KEY (trace_id)
+        REFERENCES cross_layer_traces(trace_id)
+);
