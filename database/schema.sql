@@ -1,6 +1,4 @@
-CREATE DATABASE IF NOT EXISTS os_dbx;
 
-USE os_dbx;
 
 # USER TABLE CREATED BY "KRISHNA NITIN ANASANE"
 CREATE TABLE users (
@@ -46,7 +44,7 @@ CREATE TABLE threads (
 #SYSTEM_CALLS TABLE CREATED BY "KRISHNA NITIN ANASANE"
 CREATE TABLE system_calls (
     syscall_id INT AUTO_INCREMENT PRIMARY KEY,
-    process_id INT NOT NULL,
+    process_id BIGINT NOT NULL,
     syscall_name VARCHAR(100) NOT NULL,
     arguments TEXT,
     return_value VARCHAR(255),
@@ -66,8 +64,6 @@ ON system_calls(timestamp);
 CREATE TABLE os_events (
     event_id INT AUTO_INCREMENT PRIMARY KEY,
     pid INT NOT NULL,
-    ppid INT,
-    user VARCHAR(255),
     event_type VARCHAR(100) NOT NULL,
     file_path VARCHAR(1000),
     timestamp DATETIME,
@@ -77,7 +73,7 @@ CREATE TABLE os_events (
 #RESOURCE_METRICS TABLE CREATED BY "KRISHNA NITIN ANASANE"
 CREATE TABLE resource_metrics (
     metric_id INT AUTO_INCREMENT PRIMARY KEY,
-    process_id INT NOT NULL,
+    process_id BIGINT NOT NULL,
     cpu_usage FLOAT,
     memory_usage FLOAT,
     disk_io FLOAT,
@@ -96,7 +92,11 @@ CREATE TABLE files (
     file_path VARCHAR(1000),
     owner_id INT,
     permissions VARCHAR(20),
-    size_bytes BIGINT
+    size_bytes BIGINT,
+
+    CONSTRAINT fk_file_owner
+        FOREIGN KEY (owner_id)
+        REFERENCES users(user_id)
 );
 
 #DIRECTORIES TABLE CREATED BY "KRISHNA NITIN ANASANE"
@@ -116,5 +116,107 @@ CREATE TABLE permissions (
     file_id INT NOT NULL,
     user_id INT NOT NULL,
     access_type VARCHAR(20),
-    granted_at DATETIME
+    granted_at DATETIME,
+
+    CONSTRAINT fk_permission_file
+        FOREIGN KEY (file_id)
+        REFERENCES files(file_id),
+
+    CONSTRAINT fk_permission_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(user_id)
+);
+
+#SIMULATION TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE simulations (
+    simulation_id INT AUTO_INCREMENT PRIMARY KEY,
+    type VARCHAR(100),
+    algorithm VARCHAR(100),
+    created_by INT,
+    created_at DATETIME,
+    status VARCHAR(50),
+    CONSTRAINT fk_simulations_created_by
+        FOREIGN KEY (created_by)
+        REFERENCES users(user_id)
+);
+
+#SCHEDULED_PROCESSES TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE scheduled_processes (
+    sp_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    process_label VARCHAR(50),
+    arrival_time INT,
+    burst_time INT,
+    priority INT,
+    waiting_time INT,
+    turnaround_time INT,
+    completion_time INT,
+
+    CONSTRAINT fk_scheduled_process_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+#MEMORY_EXPERIMENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE memory_experiments (
+    experiment_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    algorithm VARCHAR(100),
+    frame_count INT,
+    result_summary TEXT,
+
+    CONSTRAINT fk_memory_experiment_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+#PAGE_REFERENCES TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE page_references (
+    page_ref_id INT AUTO_INCREMENT PRIMARY KEY,
+    experiment_id INT NOT NULL,
+    page_number INT,
+    sequence_order INT,
+    fault_occurred BOOLEAN,
+
+    CONSTRAINT fk_page_reference_experiment
+        FOREIGN KEY (experiment_id)
+        REFERENCES memory_experiments(experiment_id)
+);
+
+#DISK_REQUESTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE disk_requests (
+    request_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    track_number INT,
+    sequence_order INT,
+    seek_time INT,
+
+    CONSTRAINT fk_disk_request_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+#DEADLOCK_EXPERIMENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE deadlock_experiments (
+    deadlock_exp_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    algorithm VARCHAR(100),
+    deadlock_detected BOOLEAN,
+    cycle_path TEXT,
+
+    CONSTRAINT fk_deadlock_experiment_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+#SYNCHRONIZATION_EXPERIMENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE synchronization_experiments (
+    sync_exp_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    problem_type VARCHAR(100),
+    result_log TEXT,
+
+    CONSTRAINT fk_sync_experiment_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
 );
