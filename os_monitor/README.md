@@ -27,7 +27,8 @@ processes, and:
   "ppid": 1,
   "user": "krishna",
   "event_type": "process_created",
-  "file_path": "/usr/bin/python3"
+  "file_path": "/usr/bin/python3",
+  "state": "running"
 }
 ```
 
