@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+
+# Node / React
+node_modules/
+build/
+dist/
+
+# OS
+.DS_Store
+
+# Local test output - not meant for version control
+os_monitor/events.jsonl
+os_monitor/resource_metrics.jsonl
