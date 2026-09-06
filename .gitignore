@@ -1,0 +1,14 @@
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+backend/.env
+# Environment files
+.env
+backend/.env
+
+# OS collector local output (not meant to be committed)
+os_monitor/events.jsonl
+venv/
