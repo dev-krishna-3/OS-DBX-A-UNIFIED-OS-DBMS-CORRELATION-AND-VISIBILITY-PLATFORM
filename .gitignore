@@ -16,3 +16,5 @@ dist/
 # Local test output - not meant for version control
 os_monitor/events.jsonl
 os_monitor/resource_metrics.jsonl
+os_monitor/filesystem_events.jsonl
+os_monitor/watched_folder/
