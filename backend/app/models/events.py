@@ -1,18 +1,59 @@
-"""Normalized event models emitted by DBMS features."""
+"""Normalized OS and DBMS event models."""
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
 
 
-class DBMSEvent(BaseModel):
-    """Stable representation of one DBMS query execution event.
+class OSEventType(str, Enum):
+    """Event types currently emitted by the OS collector."""
 
-    The event contains the identifiers and query metadata needed to identify
-    the same execution later.  ``timestamp`` is stored as a naive UTC
-    ``datetime`` because that is the representation used by MySQL DATETIME.
-    """
+    PROCESS_CREATED = "process_created"
+    PROCESS_TERMINATED = "process_terminated"
+
+
+class OSEvent(BaseModel):
+    """A single OS event as reported by the collector."""
+
+    timestamp: datetime = Field(
+        ..., description="When the event occurred (ISO 8601, timezone-aware preferred)."
+    )
+    pid: int = Field(..., gt=0, description="Process ID. Must be a positive integer.")
+    ppid: int = Field(..., ge=0, description="Parent process ID. 0 is valid (e.g. init).")
+    user: str = Field(..., min_length=1, description="OS user that owns the process.")
+    event_type: OSEventType = Field(..., description="Kind of OS event.")
+    file_path: str | None = Field(
+        default=None,
+        description="Executable path, if known. The collector sends null when unavailable.",
+    )
+
+    @field_validator("user")
+    @classmethod
+    def user_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("user must not be blank")
+        return stripped
+
+    @field_validator("file_path")
+    @classmethod
+    def blank_file_path_to_none(cls, value: str | None) -> str | None:
+        if value is not None and value.strip() == "":
+            return None
+        return value
+
+
+class StoredOSEvent(OSEvent):
+    """An OS event as held in the service layer, with server-assigned metadata."""
+
+    id: int = Field(..., description="Server-assigned sequential ID.")
+    received_at: datetime = Field(..., description="When the backend accepted the event.")
+
+
+class DBMSEvent(BaseModel):
+    """Stable representation of one DBMS query execution event."""
 
     model_config = ConfigDict(extra="forbid")
 

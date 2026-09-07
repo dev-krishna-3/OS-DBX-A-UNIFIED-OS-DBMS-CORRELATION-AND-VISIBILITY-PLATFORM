@@ -36,7 +36,10 @@ class QueryExecutionRequest(BaseModel):
         return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-class QueryExecutionResponse(DBMSEvent):
+class QueryExecutionRecord(DBMSEvent):
     """Persisted query execution event returned after insert."""
 
     query_id: PositiveInt
+
+
+QueryExecutionResponse = QueryExecutionRecord

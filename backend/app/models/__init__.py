@@ -1,1 +1,1 @@
-"""Pydantic models used by the backend."""
+"""Domain models used by the backend."""

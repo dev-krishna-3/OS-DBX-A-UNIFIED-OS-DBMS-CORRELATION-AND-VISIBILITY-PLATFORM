@@ -6,6 +6,7 @@ from app.models.events import DBMSEvent
 from app.repositories.transaction_repository import (
     TransactionNotFoundError,
     TransactionPIDMismatchError,
+    TransactionStateError,
 )
 
 
@@ -16,38 +17,48 @@ class QueryRepository:
         self.connection = connection
 
     def record_query(self, event: DBMSEvent) -> int:
-        """Validate the association and insert one query execution row.
-
-        Every value is passed as a SQL parameter.  The connection is committed
-        only after the insert succeeds and rolled back for every failure.
-        """
+        """Validate the transaction association and insert one query row."""
 
         cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
+
             cursor.execute(
                 """
                 SELECT pid, status
                 FROM transactions
                 WHERE transaction_id = %s
+                FOR UPDATE
                 """,
                 (event.transaction_id,),
             )
+
             transaction = cursor.fetchone()
+
             if transaction is None:
-                raise TransactionNotFoundError(
-                    f"transaction {event.transaction_id} was not found"
-                )
+                raise TransactionNotFoundError(event.transaction_id)
 
             transaction_pid = (
                 transaction["pid"]
                 if isinstance(transaction, dict)
                 else transaction[0]
             )
+            transaction_status = (
+                transaction["status"]
+                if isinstance(transaction, dict)
+                else transaction[1]
+            )
+
+            if transaction_status != "ACTIVE":
+                raise TransactionStateError(
+                    f"Transaction {event.transaction_id} is "
+                    f"{transaction_status}, not ACTIVE"
+                )
+
             if int(transaction_pid) != event.pid:
                 raise TransactionPIDMismatchError(
-                    f"transaction {event.transaction_id} belongs to PID "
-                    f"{transaction_pid}, not {event.pid}"
+                    f"PID {event.pid} is not associated with "
+                    f"transaction {event.transaction_id}"
                 )
 
             cursor.execute(
@@ -74,11 +85,14 @@ class QueryRepository:
                     event.timestamp,
                 ),
             )
+
             self.connection.commit()
             return int(cursor.lastrowid)
+
         except Exception:
             self.connection.rollback()
             raise
+
         finally:
             if cursor is not None:
                 cursor.close()

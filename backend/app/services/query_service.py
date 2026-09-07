@@ -5,8 +5,8 @@ from typing import Protocol
 
 from app.models.events import DBMSEvent
 from app.models.query_executions import (
+    QueryExecutionRecord,
     QueryExecutionRequest,
-    QueryExecutionResponse,
 )
 
 
@@ -29,7 +29,9 @@ class QueryService:
     def __init__(self, repository: QueryRepositoryProtocol) -> None:
         self.repository = repository
 
-    def record_query(self, request: QueryExecutionRequest) -> QueryExecutionResponse:
+    def record_query(
+        self, request: QueryExecutionRequest
+    ) -> QueryExecutionRecord:
         """Record a request and return it with the database query ID."""
 
         event = DBMSEvent(
@@ -42,13 +44,13 @@ class QueryService:
             status=request.status,
             timestamp=request.timestamp or utc_now(),
         )
+
         query_id = self.repository.record_query(event)
         event_values = event.model_dump(exclude={"query_id"})
-        return QueryExecutionResponse(
+
+        return QueryExecutionRecord(
             query_id=query_id,
             **event_values,
         )
 
-    # A descriptive alias keeps the service convenient for callers that use
-    # the table's full name while retaining the short method used internally.
     record_execution = record_query
