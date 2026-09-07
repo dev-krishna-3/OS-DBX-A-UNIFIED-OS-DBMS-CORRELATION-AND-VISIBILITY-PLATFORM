@@ -4,11 +4,15 @@ from datetime import datetime
 
 
 class TransactionNotFoundError(Exception):
-    pass
+    """Raised when a transaction does not exist."""
+
+
+class TransactionPIDMismatchError(ValueError):
+    """Raised when a query PID differs from its transaction PID."""
 
 
 class TransactionStateError(Exception):
-    pass
+    """Raised when a transaction is not in the required state."""
 
 
 class TransactionRepository:
@@ -27,7 +31,9 @@ class TransactionRepository:
                 (pid, "ACTIVE", timestamp, isolation_level),
             )
             transaction_id = cursor.lastrowid
-            self._insert_operation(cursor, transaction_id, "BEGIN", None, 1, timestamp)
+            self._insert_operation(
+                cursor, transaction_id, "BEGIN", None, 1, timestamp
+            )
             self.connection.commit()
             return transaction_id
         except Exception:
@@ -37,7 +43,11 @@ class TransactionRepository:
             cursor.close()
 
     def add_operation(
-        self, transaction_id: int, operation_type: str, data_item: str, timestamp: datetime
+        self,
+        transaction_id: int,
+        operation_type: str,
+        data_item: str,
+        timestamp: datetime,
     ) -> int:
         cursor = self.connection.cursor(dictionary=True)
         try:
@@ -46,11 +56,14 @@ class TransactionRepository:
                 (transaction_id,),
             )
             transaction = cursor.fetchone()
+
             if transaction is None:
                 raise TransactionNotFoundError(transaction_id)
+
             if transaction["status"] != "ACTIVE":
                 raise TransactionStateError(
-                    f"Transaction {transaction_id} is {transaction['status']}, not ACTIVE"
+                    f"Transaction {transaction_id} is "
+                    f"{transaction['status']}, not ACTIVE"
                 )
 
             cursor.execute(
@@ -62,11 +75,18 @@ class TransactionRepository:
                 (transaction_id,),
             )
             sequence_no = cursor.fetchone()["next_sequence"]
+
             self._insert_operation(
-                cursor, transaction_id, operation_type, data_item, sequence_no, timestamp
+                cursor,
+                transaction_id,
+                operation_type,
+                data_item,
+                sequence_no,
+                timestamp,
             )
             self.connection.commit()
             return sequence_no
+
         except Exception:
             self.connection.rollback()
             raise
@@ -74,7 +94,10 @@ class TransactionRepository:
             cursor.close()
 
     def finish(
-        self, transaction_id: int, status: str, timestamp: datetime
+        self,
+        transaction_id: int,
+        status: str,
+        timestamp: datetime,
     ) -> None:
         cursor = self.connection.cursor(dictionary=True)
         try:
@@ -83,11 +106,14 @@ class TransactionRepository:
                 (transaction_id,),
             )
             transaction = cursor.fetchone()
+
             if transaction is None:
                 raise TransactionNotFoundError(transaction_id)
+
             if transaction["status"] != "ACTIVE":
                 raise TransactionStateError(
-                    f"Transaction {transaction_id} is {transaction['status']}, not ACTIVE"
+                    f"Transaction {transaction_id} is "
+                    f"{transaction['status']}, not ACTIVE"
                 )
 
             cursor.execute(
@@ -99,8 +125,20 @@ class TransactionRepository:
                 (transaction_id,),
             )
             sequence_no = cursor.fetchone()["next_sequence"]
-            operation_type = "COMMIT" if status == "COMMITTED" else "ROLLBACK"
-            self._insert_operation(cursor, transaction_id, operation_type, None, sequence_no, timestamp)
+
+            operation_type = (
+                "COMMIT" if status == "COMMITTED" else "ROLLBACK"
+            )
+
+            self._insert_operation(
+                cursor,
+                transaction_id,
+                operation_type,
+                None,
+                sequence_no,
+                timestamp,
+            )
+
             cursor.execute(
                 """
                 UPDATE transactions
@@ -109,9 +147,14 @@ class TransactionRepository:
                 """,
                 (status, timestamp, transaction_id, "ACTIVE"),
             )
+
             if cursor.rowcount != 1:
-                raise TransactionStateError(f"Transaction {transaction_id} could not be finished")
+                raise TransactionStateError(
+                    f"Transaction {transaction_id} could not be finished"
+                )
+
             self.connection.commit()
+
         except Exception:
             self.connection.rollback()
             raise
@@ -119,12 +162,25 @@ class TransactionRepository:
             cursor.close()
 
     @staticmethod
-    def _insert_operation(cursor, transaction_id, operation_type, data_item, sequence_no, timestamp):
+    def _insert_operation(
+        cursor,
+        transaction_id,
+        operation_type,
+        data_item,
+        sequence_no,
+        timestamp,
+    ):
         cursor.execute(
             """
             INSERT INTO transaction_operations
                 (transaction_id, operation_type, data_item, sequence_no, timestamp)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (transaction_id, operation_type, data_item, sequence_no, timestamp),
+            (
+                transaction_id,
+                operation_type,
+                data_item,
+                sequence_no,
+                timestamp,
+            ),
         )

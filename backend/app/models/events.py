@@ -1,28 +1,10 @@
-"""
-OS event model.
+"""Normalized OS and DBMS event models."""
 
-Validates events against the contract already produced by
-`os_monitor/collector.py` (see os_monitor/README.md):
-
-    {
-        "timestamp": "2026-08-26T10:15:03.221+00:00",
-        "pid": 4211,
-        "ppid": 1,
-        "user": "krishna",
-        "event_type": "process_created",
-        "file_path": "/usr/bin/python3"
-    }
-
-Only the two event types the collector currently emits are accepted.
-New event types (e.g. filesystem events) should be added to
-`OSEventType` when the collector starts producing them - do not
-loosen validation to accept arbitrary strings.
-"""
-
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
 
 
 class OSEventType(str, Enum):
@@ -58,8 +40,6 @@ class OSEvent(BaseModel):
     @field_validator("file_path")
     @classmethod
     def blank_file_path_to_none(cls, value: str | None) -> str | None:
-        # The collector sends null for unavailable paths, but guard against
-        # an empty string slipping through too.
         if value is not None and value.strip() == "":
             return None
         return value
@@ -70,3 +50,38 @@ class StoredOSEvent(OSEvent):
 
     id: int = Field(..., description="Server-assigned sequential ID.")
     received_at: datetime = Field(..., description="When the backend accepted the event.")
+
+
+class DBMSEvent(BaseModel):
+    """Stable representation of one DBMS query execution event."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: Literal["QUERY_EXECUTION"] = "QUERY_EXECUTION"
+    query_id: PositiveInt | None = None
+    transaction_id: PositiveInt
+    pid: PositiveInt
+    query_type: str = Field(min_length=1, max_length=50)
+    query_text: str = Field(min_length=1)
+    execution_time_ms: float = Field(ge=0, allow_inf_nan=False)
+    rows_affected: int = Field(ge=0)
+    status: str = Field(min_length=1, max_length=50)
+    timestamp: datetime
+
+    @field_validator("query_type", "query_text", "status")
+    @classmethod
+    def reject_blank_text(cls, value: str) -> str:
+        """Reject blank values without changing the original metadata."""
+
+        if not value.strip():
+            raise ValueError("value must not be blank")
+        return value
+
+    @field_validator("timestamp")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        """Convert timestamps to the UTC-naive form accepted by DATETIME."""
+
+        if value.tzinfo is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
