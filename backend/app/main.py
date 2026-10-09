@@ -15,8 +15,9 @@ adapter block degrades gracefully: the health endpoints still respond, and the
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 
+from app.api.routes_auth import router as auth_router
 from app.api.routes_events import router as events_router
 from app.api.routes_correlation import router as correlation_router
 from app.api.routes_deadlocks import router as deadlocks_router
@@ -34,6 +35,7 @@ from app.api.routes_benchmark import router as benchmark_router
 from app.api.routes_blast_radius import router as blast_radius_router
 from app.api.routes_os_events import router as os_events_router
 from app.config.settings import settings
+from app.core.auth import get_current_user
 
 
 @asynccontextmanager
@@ -78,22 +80,28 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
-app.include_router(events_router, prefix="/api")
-app.include_router(correlation_router, prefix="/api")
-app.include_router(deadlocks_router, prefix="/api")
-app.include_router(dbms_events_router, prefix="/api")
-app.include_router(query_executions_router, prefix="/api")
-app.include_router(recovery_router, prefix="/api")
-app.include_router(schedules_router, prefix="/api")
-app.include_router(performance_router, prefix="/api")
-app.include_router(investigation_router, prefix="/api")
-app.include_router(what_if_router, prefix="/api")
-app.include_router(locks_router, prefix="/api")
-app.include_router(transactions_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
+
+# Protected Routes
+secure = [Depends(get_current_user)]
+app.include_router(events_router, prefix="/api", dependencies=secure)
+app.include_router(correlation_router, prefix="/api", dependencies=secure)
+app.include_router(deadlocks_router, prefix="/api", dependencies=secure)
+app.include_router(dbms_events_router, prefix="/api", dependencies=secure)
+app.include_router(query_executions_router, prefix="/api", dependencies=secure)
+app.include_router(recovery_router, prefix="/api", dependencies=secure)
+app.include_router(schedules_router, prefix="/api", dependencies=secure)
+app.include_router(performance_router, prefix="/api", dependencies=secure)
+app.include_router(investigation_router, prefix="/api", dependencies=secure)
+app.include_router(what_if_router, prefix="/api", dependencies=secure)
+app.include_router(locks_router, prefix="/api", dependencies=secure)
+app.include_router(transactions_router, prefix="/api", dependencies=secure)
+app.include_router(benchmark_router, dependencies=secure)
+app.include_router(blast_radius_router, dependencies=secure)
+app.include_router(os_events_router, prefix="/api", dependencies=secure)
+
+# Demo routes remain open for evaluators
 app.include_router(demo_router, prefix="/api")
-app.include_router(benchmark_router)
-app.include_router(blast_radius_router)
-app.include_router(os_events_router, prefix="/api")
 
 
 @app.get("/", include_in_schema=False)
