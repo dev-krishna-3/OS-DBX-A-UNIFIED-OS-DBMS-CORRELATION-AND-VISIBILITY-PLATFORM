@@ -2,7 +2,7 @@
 OS-DBX Phase 2 - Full End-to-End Verification Script
 Tests the entire backend stack: Auth + Protected APIs + Live DB Data
 
-Run with:  backend\venv\Scripts\python.exe test_e2e_final.py
+Run with:  backend/venv/Scripts/python.exe test_e2e_final.py
            (from project root, with backend server running on port 8000)
 """
 import requests
