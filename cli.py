@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import datetime
 import requests
 from rich.console import Console
 from rich.table import Table
@@ -161,6 +162,184 @@ def run_benchmark():
             console.print(table)
         else:
             console.print(f"[bold red]Benchmark Failed: {r.text}[/bold red]")
+
+# ---------------------------------------------------------------------------
+# Real-Time Cross-Layer OS-DBMS Correlation Engine Functions
+# ---------------------------------------------------------------------------
+
+def run_cross_layer_correlation():
+    console.print("\n[bold cyan]--- Real-Time Cross-Layer OS-DBMS Correlation Engine ---[/bold cyan]")
+    pid = IntPrompt.ask("Enter OS PID", default=4211)
+    tx_id = IntPrompt.ask("Enter DBMS Transaction ID", default=12)
+    query_id = IntPrompt.ask("Enter Query ID", default=25)
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    events = [
+        {
+            "os_event_id": 2001,
+            "pid": pid,
+            "transaction_id": tx_id,
+            "query_id": query_id,
+            "timestamp": now_iso,
+            "event_type": "process_created",
+            "source": "os_monitor_adapter"
+        },
+        {
+            "os_event_id": 2002,
+            "pid": pid,
+            "transaction_id": tx_id,
+            "query_id": query_id,
+            "timestamp": now_iso,
+            "event_type": "transaction_started",
+            "source": "dbms_transaction_tracker"
+        },
+        {
+            "os_event_id": 2003,
+            "pid": pid,
+            "transaction_id": tx_id,
+            "query_id": query_id,
+            "timestamp": now_iso,
+            "event_type": "query_executed",
+            "source": "dbms_performance_schema"
+        }
+    ]
+
+    with console.status("[bold green]Executing Cross-Layer Event Correlation..."):
+        r = session.post(f"{API_BASE_URL}/api/correlations", json={"events": events}, headers=get_headers())
+        if r.status_code == 200:
+            res = r.json()
+            classification = res.get("classification", "NONE")
+            trace = res.get("trace") or {}
+            
+            console.print(Panel(
+                f"[bold green]✔ CORRELATION RESULT[/bold green]\n\n"
+                f"Classification: [bold yellow]{classification}[/bold yellow]\n"
+                f"Is Correlated: [bold green]{res.get('is_correlated')}[/bold green]\n"
+                f"Summary: {trace.get('summary', 'N/A')}\n"
+                f"Completeness Score: [bold cyan]{res.get('os_evidence_completeness', 'N/A')}[/bold cyan]",
+                border_style="green" if res.get('is_correlated') else "red"
+            ))
+
+            corrs = res.get("correlations", [])
+            if corrs:
+                table = Table(title="Causal Sequence & Cross-Layer Map")
+                table.add_column("Seq #", justify="right", style="cyan")
+                table.add_column("OS Event ID", justify="right", style="magenta")
+                table.add_column("Query ID", justify="right", style="green")
+                table.add_column("Method", style="yellow")
+                for c in corrs:
+                    table.add_row(str(c["sequence_order"]), str(c["os_event_id"]), str(c["query_id"]), c["correlation_method"])
+                console.print(table)
+        else:
+            console.print(f"[bold red]Correlation Failed: {r.text}[/bold red]")
+
+
+def run_auto_correlation():
+    console.print("\n[bold cyan]--- DBMS-OS Auto-Correlation Engine ---[/bold cyan]")
+    obs_id = IntPrompt.ask("Enter DBMS Observation ID to auto-correlate", default=1)
+    window_ms = IntPrompt.ask("Time Window (ms)", default=5000)
+
+    with console.status(f"[bold green]Auto-correlating DBMS Observation #{obs_id}..."):
+        r = session.post(f"{API_BASE_URL}/api/correlations/auto", json={
+            "observation_id": obs_id,
+            "window_ms": window_ms,
+            "persist": True
+        }, headers=get_headers())
+        if r.status_code == 200:
+            res = r.json()
+            console.print(Panel(
+                f"[bold green]✔ AUTO-CORRELATION COMPLETE[/bold green]\n\n"
+                f"Observation ID: [bold cyan]{res.get('observation_id')}[/bold cyan]\n"
+                f"Matched Query ID: [bold yellow]{res.get('matched_query_id', 'None')}[/bold yellow]\n"
+                f"Matched OS Events: [bold magenta]{res.get('matched_os_event_ids', [])}[/bold magenta]\n"
+                f"Status: {res.get('reason', 'Success')}",
+                border_style="green" if res.get('matched_query_id') else "yellow"
+            ))
+        else:
+            console.print(f"[bold red]Auto-Correlation Failed: {r.text}[/bold red]")
+
+
+def run_blast_radius_analysis():
+    console.print("\n[bold cyan]--- Incident Blast Radius & Causality Analysis ---[/bold cyan]")
+    incident_id = IntPrompt.ask("Enter Incident ID", default=1)
+
+    with console.status(f"[bold green]Computing Blast Radius for Incident #{incident_id}..."):
+        r = session.get(f"{API_BASE_URL}/api/v1/incidents/{incident_id}/blast-radius", headers=get_headers())
+        if r.status_code == 200:
+            res = r.json()
+            console.print(f"\n[bold green]Incident #{res['incident_id']} ({res['incident_type']}) Impact Analysis[/bold green]")
+            
+            table = Table(title="Affected Resources (Direct, Indirect & Potential Impact)")
+            table.add_column("Level", style="red")
+            table.add_column("Resource Type", style="cyan")
+            table.add_column("Resource ID", style="yellow")
+            table.add_column("Applied Rule", style="magenta")
+            table.add_column("Relationship Evidence")
+
+            for item in res.get("affected_resources", []):
+                ev = item.get("evidence", {})
+                table.add_row(
+                    item["impact_level"],
+                    item["resource_type"],
+                    str(item["resource_id"]),
+                    ev.get("rule_applied", "N/A"),
+                    ev.get("relationship", "N/A")
+                )
+            console.print(table)
+        else:
+            console.print(f"[bold red]Blast Radius Computation Failed: {r.text}[/bold red]")
+
+
+def run_correlation_demo_cli():
+    with console.status("[bold magenta]Running Cross-Layer Engine Live Verification Demo..."):
+        r = session.get(f"{API_BASE_URL}/api/demo/correlation")
+        if r.status_code == 200:
+            res = r.json()
+            console.print(Panel(
+                f"[bold green]✔ DEMO VERIFICATION: {res['status']}[/bold green]\n\n"
+                f"Scenario: [bold cyan]{res['demo']}[/bold cyan]\n"
+                f"Generated At: {res['generated_at']}",
+                border_style="green" if res['status'] == "PASS" else "red"
+            ))
+            
+            table = Table(title="Deterministic Check Verification")
+            table.add_column("Check Name", style="cyan")
+            table.add_column("Passed", justify="center")
+            table.add_column("Details", style="green")
+
+            for check in res.get("checks", []):
+                pass_str = "[bold green]YES[/bold green]" if check["passed"] else "[bold red]NO[/bold red]"
+                table.add_row(check["name"], pass_str, check["detail"])
+            console.print(table)
+        else:
+            console.print(f"[bold red]Demo Failed: {r.text}[/bold red]")
+
+
+def cross_layer_correlation_menu():
+    while True:
+        console.clear()
+        console.print(Panel.fit("[bold cyan]Real-Time Cross-Layer OS-DBMS Correlation Engine[/bold cyan]", border_style="cyan"))
+        console.print("[1] Execute Real-Time Event Correlation (OS PID + Transaction + Query)")
+        console.print("[2] Run DBMS-OS Auto-Correlation Engine (Match Observations to OS Events)")
+        console.print("[3] Compute Incident Blast Radius & Causality Impact")
+        console.print("[4] Run Engine Verification Live Demo")
+        console.print("[5] Back to Main Menu")
+
+        choice = Prompt.ask("Choose a Correlation Engine option", choices=["1", "2", "3", "4", "5"])
+        if choice == "5":
+            break
+        elif choice == "1":
+            run_cross_layer_correlation()
+            Prompt.ask("\nPress Enter to return to Correlation menu")
+        elif choice == "2":
+            run_auto_correlation()
+            Prompt.ask("\nPress Enter to return to Correlation menu")
+        elif choice == "3":
+            run_blast_radius_analysis()
+            Prompt.ask("\nPress Enter to return to Correlation menu")
+        elif choice == "4":
+            run_correlation_demo_cli()
+            Prompt.ask("\nPress Enter to return to Correlation menu")
 
 # ---------------------------------------------------------------------------
 # OS Simulation Lab Functions
@@ -370,15 +549,17 @@ def main_menu():
 
         console.print("[1] View Live DBMS Observations (Query Fetcher)")
         console.print("[2] View Recent Deadlocks & Incidents")
-        console.print("[3] Run Live Benchmark Simulator")
-        console.print("[4] Collect OS-DB Events (Ping Performance Schema)")
-        console.print("[5] OS Simulation & Work Analysis Lab (Scheduling, Memory, Deadlocks)")
-        console.print("[6] Logout / Exit")
+        console.print("[3] Real-Time Cross-Layer OS-DBMS Correlation Engine")
+        console.print("[4] Incident Blast Radius & Causality Analysis")
+        console.print("[5] Run Live Benchmark Simulator (OS + DBMS Load)")
+        console.print("[6] Collect OS-DB Events (Ping Performance Schema)")
+        console.print("[7] OS Simulation Lab (Scheduling, Memory, Deadlocks)")
+        console.print("[8] Logout / Exit")
         
-        choice = Prompt.ask("Choose an action", choices=["1", "2", "3", "4", "5", "6"])
+        choice = Prompt.ask("Choose an action", choices=["1", "2", "3", "4", "5", "6", "7", "8"])
         
         console.clear()
-        if choice == "6":
+        if choice == "8":
             console.print("[bold yellow]Logging out...[/bold yellow]")
             sys.exit(0)
             
@@ -389,12 +570,19 @@ def main_menu():
         elif choice == "2":
             fetch_deadlocks()
             Prompt.ask("\nPress Enter to return to menu")
-            
+
         elif choice == "3":
+            cross_layer_correlation_menu()
+
+        elif choice == "4":
+            run_blast_radius_analysis()
+            Prompt.ask("\nPress Enter to return to menu")
+
+        elif choice == "5":
             run_benchmark()
             Prompt.ask("\nPress Enter to return to menu")
             
-        elif choice == "4":
+        elif choice == "6":
             with console.status("[bold blue]Collecting events from MySQL Performance Schema..."):
                 r = session.post(f"{API_BASE_URL}/api/dbms-events/collect", json={"limit": 25, "persist": True}, headers=get_headers())
                 if r.status_code == 200:
@@ -405,7 +593,7 @@ def main_menu():
                     console.print(f"[bold red]Collection Failed: {r.text}[/bold red]")
             Prompt.ask("\nPress Enter to return to menu")
 
-        elif choice == "5":
+        elif choice == "7":
             os_simulation_menu()
 
 if __name__ == "__main__":
