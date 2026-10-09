@@ -29,7 +29,11 @@ def get_transaction_service(connection=Depends(get_connection)):
 def _state_error(error: Exception) -> HTTPException:
     if isinstance(error, TransactionNotFoundError):
         return HTTPException(status_code=404, detail="Transaction not found")
-    return HTTPException(status_code=409, detail=str(error))
+    if isinstance(error, TransactionStateError):
+        return HTTPException(status_code=409, detail=str(error))
+    if isinstance(error, HTTPException):
+        return error
+    return HTTPException(status_code=500, detail=f"Transaction processing error: {error}")
 
 
 @router.post("/begin", status_code=201)

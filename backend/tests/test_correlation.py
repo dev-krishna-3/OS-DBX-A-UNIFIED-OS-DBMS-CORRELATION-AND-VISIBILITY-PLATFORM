@@ -49,7 +49,7 @@ def test_valid_process_transaction_query_correlation():
     assert [item.os_event_id for item in result.causal_sequence] == [1, 2, 3]
     assert [item.sequence_order for item in result.correlations] == [1, 2, 3]
     assert all(item.query_id == 25 for item in result.correlations)
-    assert all(item.confidence_score == 1.0 for item in result.correlations)
+    assert all(item.confidence_score is None for item in result.correlations)
 
 
 def test_pid_mismatch_does_not_claim_causation():
@@ -59,6 +59,29 @@ def test_pid_mismatch_does_not_claim_causation():
     assert result.trace is None
     assert result.correlations == []
     assert result.reason == "PID values do not match"
+
+
+def test_duplicate_os_event_ids_do_not_claim_causation():
+    result = CorrelationService().correlate([event(1, 0), event(1, 1)])
+
+    assert not result.is_correlated
+    assert result.reason == "OS event IDs must be unique"
+
+
+def test_transaction_mismatch_does_not_claim_causation():
+    result = CorrelationService().correlate(
+        [event(1, 0), event(2, 1, transaction_id=99)]
+    )
+
+    assert not result.is_correlated
+    assert result.reason == "transaction IDs do not match"
+
+
+def test_query_mismatch_does_not_claim_causation():
+    result = CorrelationService().correlate([event(1, 0), event(2, 1, query_id=99)])
+
+    assert not result.is_correlated
+    assert result.reason == "query IDs do not match"
 
 
 def test_missing_transaction_does_not_claim_causation():
