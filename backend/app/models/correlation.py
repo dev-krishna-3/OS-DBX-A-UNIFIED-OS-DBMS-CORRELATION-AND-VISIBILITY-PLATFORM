@@ -76,7 +76,9 @@ class EventCorrelation(BaseModel):
     db_event_id: PositiveInt | None = None
     query_id: PositiveInt
     correlation_method: str = Field(min_length=1, max_length=100)
-    confidence_score: float = Field(ge=0, le=1, allow_inf_nan=False)
+    # Retained as nullable for compatibility with the existing database/API
+    # shape. Correlation is rule-based and does not calculate probabilities.
+    confidence_score: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     sequence_order: PositiveInt
 
     _validate_method = field_validator("correlation_method")(_reject_blank)
@@ -102,6 +104,14 @@ class CorrelationResult(BaseModel):
         """Tell callers whether a causal claim was produced."""
 
         return self.trace is not None and bool(self.correlations)
+
+
+class CorrelationRequest(BaseModel):
+    """API request containing the normalized events to correlate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    events: list[CorrelationInput] = Field(min_length=1)
 
 
 # Descriptive aliases keep the model easy to discover for callers using either

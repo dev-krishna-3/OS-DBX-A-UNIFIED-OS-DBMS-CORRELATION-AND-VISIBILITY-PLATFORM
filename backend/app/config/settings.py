@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     mysql_user: str = "root"
     mysql_password: str = ""
     mysql_database: str = "os_dbx"
+    # Keep local development self-contained; set EVENT_STORAGE=mysql when
+    # the MySQL schema is available and OS events should be durable.
+    event_storage: str = "memory"
+    dbms_collection_interval_seconds: int = 5
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

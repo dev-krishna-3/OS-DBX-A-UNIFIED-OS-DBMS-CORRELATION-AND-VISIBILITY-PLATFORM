@@ -1,8 +1,8 @@
 """
 Event service.
 
-Temporary in-memory storage for OS events so the API contract and event
-flow can be exercised before MySQL persistence is added in Milestone 2.
+OS event service supporting both local in-memory operation and an injected
+durable repository.
 
 No database code belongs here yet - see repositories/event_repository.py
 for where persistence will eventually live.
@@ -13,24 +13,25 @@ from datetime import datetime, timezone
 
 from app.models.events import OSEvent, StoredOSEvent
 
-# Cap in-memory storage so a long-running dev server (or a collector
-# hammering the endpoint) can't grow this unbounded. This is purely a
-# safeguard for this temporary milestone - it goes away once MySQL
-# persistence lands in Milestone 2.
+# Cap in-memory storage so a long-running local dev server cannot grow it
+# without bounds. MySQL-backed operation does not use this cap.
 MAX_STORED_EVENTS = 1000
 
 
 class EventService:
-    """Ingests and retrieves OS events using an in-memory store."""
+    """Ingests and retrieves OS events using memory or an injected repository."""
 
-    def __init__(self, max_events: int = MAX_STORED_EVENTS) -> None:
+    def __init__(self, max_events: int = MAX_STORED_EVENTS, repository=None) -> None:
         self._events: list[StoredOSEvent] = []
         self._next_id: int = 1
         self._max_events = max_events
         self._lock = threading.Lock()
+        self._repository = repository
 
     def ingest_event(self, event: OSEvent) -> StoredOSEvent:
         """Store a validated event and return it with server-assigned metadata."""
+        if self._repository is not None:
+            return self._repository.insert(event)
         with self._lock:
             stored = StoredOSEvent(
                 **event.model_dump(),
@@ -46,6 +47,8 @@ class EventService:
 
     def get_events(self, limit: int = 50) -> list[StoredOSEvent]:
         """Return the most recently ingested events, most recent first."""
+        if self._repository is not None:
+            return self._repository.recent(limit)
         with self._lock:
             if limit <= 0:
                 return []
@@ -53,7 +56,6 @@ class EventService:
             return list(reversed(self._events[-limit:]))
 
 
-# Single shared instance for the app's lifetime (fine for an in-memory
-# milestone; will be replaced by proper dependency injection once a real
-# repository/database session is introduced).
+# Single shared instance for local development and unit tests. The API creates
+# a repository-backed service per request when EVENT_STORAGE=mysql is enabled.
 event_service = EventService()

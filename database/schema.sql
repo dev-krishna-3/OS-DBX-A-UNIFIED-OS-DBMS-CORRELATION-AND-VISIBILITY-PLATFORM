@@ -393,3 +393,47 @@ CREATE TABLE performance_records (
         FOREIGN KEY (trace_id)
         REFERENCES cross_layer_traces(trace_id)
 );
+
+# DBMS_QUERY_OBSERVATIONS stores completed statements collected from MySQL
+# Performance Schema before optional OS/transaction correlation.
+CREATE TABLE dbms_query_observations (
+    observation_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source_thread_id BIGINT NOT NULL,
+    source_event_id BIGINT NOT NULL,
+    connection_id BIGINT NULL,
+    processlist_user VARCHAR(255),
+    database_name VARCHAR(255),
+    query_type VARCHAR(50) NOT NULL,
+    query_text TEXT NOT NULL,
+    execution_time_ms FLOAT NOT NULL,
+    rows_affected BIGINT NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    observed_at DATETIME NOT NULL,
+
+    CONSTRAINT uq_dbms_query_source
+        UNIQUE (source_thread_id, source_event_id)
+);
+
+# INCIDENT_REPLAYS stores deterministic investigation replays.
+CREATE TABLE incident_replays (
+    replay_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    incident_id INT NOT NULL,
+    replayed_at DATETIME NOT NULL,
+    outcome VARCHAR(50) NOT NULL,
+    steps_json LONGTEXT NOT NULL,
+    summary TEXT,
+
+    CONSTRAINT fk_replay_incident
+        FOREIGN KEY (incident_id)
+        REFERENCES incidents(incident_id)
+);
+
+# WHAT_IF_SCENARIOS stores schedule and recovery scenario inputs/results.
+CREATE TABLE what_if_scenarios (
+    scenario_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    analysis_type VARCHAR(50) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    input_json LONGTEXT NOT NULL,
+    result_json LONGTEXT NOT NULL,
+    created_at DATETIME NOT NULL
+);

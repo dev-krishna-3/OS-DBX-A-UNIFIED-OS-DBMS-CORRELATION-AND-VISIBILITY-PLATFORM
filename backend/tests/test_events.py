@@ -11,15 +11,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api.routes_events import get_event_service
 from app.services.event_service import event_service
 
 
 @pytest.fixture(autouse=True)
 def reset_event_store():
-    """Each test starts with a clean in-memory store and ID counter."""
+    """Each test uses a clean in-memory store, independent of local .env."""
     event_service._events.clear()
     event_service._next_id = 1
+    app.dependency_overrides[get_event_service] = lambda: event_service
     yield
+    app.dependency_overrides.pop(get_event_service, None)
 
 
 @pytest.fixture

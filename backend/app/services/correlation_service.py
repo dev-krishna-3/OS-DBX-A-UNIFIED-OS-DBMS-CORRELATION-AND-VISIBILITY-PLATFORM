@@ -96,7 +96,6 @@ class CorrelationService:
                 db_event_id=None,
                 query_id=event.query_id,
                 correlation_method=self.METHOD,
-                confidence_score=1.0,
                 sequence_order=sequence_order,
             )
             for sequence_order, event in enumerate(ordered, start=1)

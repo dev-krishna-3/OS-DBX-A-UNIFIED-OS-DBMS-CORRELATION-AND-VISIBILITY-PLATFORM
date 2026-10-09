@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
 
 
 class OSEventType(str, Enum):
-    """Event types currently emitted by the OS collector."""
+    """Event types currently accepted by the process collector API."""
 
     PROCESS_CREATED = "process_created"
     PROCESS_TERMINATED = "process_terminated"
@@ -48,6 +48,10 @@ class OSEvent(BaseModel):
 class StoredOSEvent(OSEvent):
     """An OS event as held in the service layer, with server-assigned metadata."""
 
+    # Existing database seed data also contains file_* events. They are
+    # returned as stored historical strings without widening the current
+    # process-ingestion contract above.
+    event_type: str
     id: int = Field(..., description="Server-assigned sequential ID.")
     received_at: datetime = Field(..., description="When the backend accepted the event.")
 
