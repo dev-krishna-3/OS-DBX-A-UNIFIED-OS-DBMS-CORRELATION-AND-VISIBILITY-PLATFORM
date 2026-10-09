@@ -18,18 +18,24 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a plain-text password against a bcrypt hash."""
     try:
         return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
     except Exception:
         return False
 
+
 def get_password_hash(password: str) -> str:
+    """Hash a plain-text password with bcrypt."""
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
     return hashed.decode('utf-8')
 
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a signed JWT access token."""
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -39,7 +45,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+
 def get_user_by_username(connection: mysql.connector.MySQLConnection, username: str) -> Optional[UserInDB]:
+    """Look up a user by username. Returns None if not found."""
     cursor = connection.cursor(dictionary=True)
     cursor.execute(
         "SELECT user_id, username, uid_linux, password_hash, created_at FROM users WHERE username = %s",
@@ -47,18 +55,22 @@ def get_user_by_username(connection: mysql.connector.MySQLConnection, username: 
     )
     user_dict = cursor.fetchone()
     cursor.close()
-    
+
     if user_dict:
-        # If password_hash is None (for old data), we might reject login or set a default.
+        # If password_hash is None (for legacy data without passwords), set empty string.
         if user_dict.get("password_hash") is None:
             user_dict["password_hash"] = ""
         return UserInDB(**user_dict)
     return None
 
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    connection = Depends(get_connection)
-) -> UserInDB:
+
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
+    """FastAPI dependency: decode JWT token and return current user.
+
+    IMPORTANT: This function opens and closes its OWN DB connection
+    independently to avoid closing the connection that route handlers
+    use. Do NOT add 'connection = Depends(get_connection)' here.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -72,7 +84,10 @@ async def get_current_user(
         token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
-        
+
+    # Open a dedicated connection just for the auth lookup — do not share
+    # this with the route handler's Depends(get_connection).
+    connection = get_connection()
     try:
         user = get_user_by_username(connection, username=token_data.username)
         if user is None:
@@ -81,6 +96,7 @@ async def get_current_user(
     finally:
         connection.close()
 
+
 async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)) -> UserInDB:
-    # Here you would check if user is active if that flag existed
+    """FastAPI dependency: return authenticated user (extend to check active flag if needed)."""
     return current_user
