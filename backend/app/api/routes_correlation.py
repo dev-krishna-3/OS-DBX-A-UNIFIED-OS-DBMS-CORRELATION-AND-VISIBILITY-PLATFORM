@@ -19,6 +19,8 @@ def get_correlation_repository(connection=Depends(get_connection)):
         connection.close()
 
 
+import mysql.connector
+
 @router.post("", response_model=CorrelationResult)
 def correlate(
     request: CorrelationRequest,
@@ -29,9 +31,17 @@ def correlate(
         return result
     try:
         return repository.persist(result)
+    except mysql.connector.Error as error:
+        if getattr(error, "errno", None) == 1452:
+            # Foreign key constraint failure (e.g. transaction_id or pid not in database tables)
+            return result
+        raise HTTPException(
+            status_code=503,
+            detail=f"Database error while persisting cross-layer trace: {error}",
+        ) from error
     except Exception as error:
         raise HTTPException(
-            status_code=409,
+            status_code=500,
             detail=f"Unable to persist cross-layer trace: {error}",
         ) from error
 

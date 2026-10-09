@@ -21,7 +21,11 @@ def get_lock_manager(connection=Depends(get_connection)):
 def _lock_error(error: Exception) -> HTTPException:
     if isinstance(error, TransactionNotFoundError):
         return HTTPException(status_code=404, detail="Transaction not found")
-    return HTTPException(status_code=409, detail=str(error))
+    if isinstance(error, TransactionStateError):
+        return HTTPException(status_code=409, detail=str(error))
+    if isinstance(error, HTTPException):
+        return error
+    return HTTPException(status_code=500, detail=f"Lock service error: {error}")
 
 
 @router.post("", response_model=LockRecord, status_code=201)

@@ -22,6 +22,10 @@ def _canonical_cycle(cycle: list[int]) -> tuple[int, ...]:
 class DeadlockService:
     """Build a wait-for graph from lock rows and return all simple cycles."""
 
+    def detect_deadlocks(self, locks: Iterable[LockSnapshot] = ()) -> list[list[int]]:
+        result = self.detect(locks)
+        return result.cycles
+
     def detect(self, locks: Iterable[LockSnapshot]) -> DeadlockDetectionResult:
         snapshots = list(locks)
         graph: dict[int, set[int]] = defaultdict(set)
