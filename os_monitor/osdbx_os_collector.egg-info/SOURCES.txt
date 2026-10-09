@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+osdbx/__init__.py
+osdbx/adapters.py
+osdbx/stream.py
+osdbx_os_collector.egg-info/PKG-INFO
+osdbx_os_collector.egg-info/SOURCES.txt
+osdbx_os_collector.egg-info/dependency_links.txt
+osdbx_os_collector.egg-info/requires.txt
+osdbx_os_collector.egg-info/top_level.txt
+tests/test_benchmark.py

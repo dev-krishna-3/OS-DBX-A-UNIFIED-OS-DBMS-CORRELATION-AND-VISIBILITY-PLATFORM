@@ -1,0 +1,1 @@
+# osdbx adapters subpackage
