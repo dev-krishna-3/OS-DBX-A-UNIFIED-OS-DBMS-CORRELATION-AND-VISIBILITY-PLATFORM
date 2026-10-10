@@ -49,17 +49,25 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def get_user_by_username(connection: mysql.connector.MySQLConnection, username: str) -> Optional[UserInDB]:
     """Look up a user by username. Returns None if not found."""
     cursor = connection.cursor(dictionary=True)
-    cursor.execute(
-        "SELECT user_id, username, uid_linux, password_hash, created_at FROM users WHERE username = %s",
-        (username,)
-    )
-    user_dict = cursor.fetchone()
-    cursor.close()
+    try:
+        cursor.execute(
+            "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin FROM users WHERE username = %s",
+            (username,)
+        )
+        user_dict = cursor.fetchone()
+    finally:
+        cursor.close()
 
     if user_dict:
         # If password_hash is None (for legacy data without passwords), set empty string.
         if user_dict.get("password_hash") is None:
             user_dict["password_hash"] = ""
+        
+        # Determine is_admin status: admin username, root Linux UID (0), or explicit flag
+        uid = user_dict.get("uid_linux", 1000)
+        uname = user_dict.get("username", "").lower()
+        user_dict["is_admin"] = bool(user_dict.get("is_admin") or uname in ("admin", "root") or uid == 0)
+
         return UserInDB(**user_dict)
     return None
 

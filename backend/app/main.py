@@ -35,6 +35,8 @@ from app.api.routes_benchmark import router as benchmark_router
 from app.api.routes_blast_radius import router as blast_radius_router
 from app.api.routes_os_events import router as os_events_router
 from app.api.routes_simulations import router as simulations_router
+from app.api.routes_audit import router as audit_router
+from app.api.routes_bridge import router as bridge_router
 from app.config.settings import settings
 from app.core.auth import get_current_user
 
@@ -101,6 +103,8 @@ app.include_router(benchmark_router, dependencies=secure)
 app.include_router(blast_radius_router, dependencies=secure)
 app.include_router(os_events_router, prefix="/api", dependencies=secure)
 app.include_router(simulations_router, prefix="/api", dependencies=secure)
+app.include_router(audit_router, prefix="/api/audit", dependencies=secure)
+app.include_router(bridge_router, prefix="/api", dependencies=secure)
 
 # Demo routes remain open for evaluators
 app.include_router(demo_router, prefix="/api")

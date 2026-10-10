@@ -334,10 +334,11 @@ def cross_layer_correlation_menu():
         console.print("[2] Run DBMS-OS Auto-Correlation Engine (Match Observations to OS Events)")
         console.print("[3] Compute Incident Blast Radius & Causality Impact")
         console.print("[4] Run Engine Verification Live Demo")
-        console.print("[5] Back to Main Menu")
+        console.print("[5] View Live Identity Bridge Map (OS PIDs <-> MySQL Connections)")
+        console.print("[6] Back to Main Menu")
 
-        choice = Prompt.ask("Choose a Correlation Engine option", choices=["1", "2", "3", "4", "5"])
-        if choice == "5":
+        choice = Prompt.ask("Choose a Correlation Engine option", choices=["1", "2", "3", "4", "5", "6"])
+        if choice == "6":
             break
         elif choice == "1":
             run_cross_layer_correlation()
@@ -351,6 +352,40 @@ def cross_layer_correlation_menu():
         elif choice == "4":
             run_correlation_demo_cli()
             Prompt.ask("\nPress Enter to return to Correlation menu")
+        elif choice == "5":
+            run_identity_bridge_live_map()
+            Prompt.ask("\nPress Enter to return to Correlation menu")
+
+def run_identity_bridge_live_map():
+    console.print("\n[bold cyan]--- Live Identity Bridge Map ---[/bold cyan]")
+    console.print("Scanning OS network sockets and MySQL PROCESSLIST to prove process identities...")
+    
+    with console.status("[bold blue]Building real-time correlation map..."):
+        r = session.get(f"{API_BASE_URL}/api/bridge/live-map", headers=get_headers())
+        
+    if r.status_code == 200:
+        data = r.json()
+        active = data.get("active_bridges", 0)
+        mapping = data.get("mapping", [])
+        
+        console.print(f"\n[bold green]Found {active} Active Bridge(s)[/bold green]")
+        
+        if active == 0:
+            console.print("[yellow]No active OS-level connections to MySQL detected at this exact moment.[/yellow]")
+            console.print("Try running a script that connects to MySQL in another terminal and check again.")
+        else:
+            table = Table(title="OS PID <-> MySQL Connection Bridge")
+            table.add_column("OS Process ID (PID)", style="cyan", justify="right")
+            table.add_column("Direction", style="dim", justify="center")
+            table.add_column("MySQL Connection ID", style="magenta", justify="left")
+            
+            for m in mapping:
+                table.add_row(str(m["os_pid"]), "<======>", str(m["mysql_connection_id"]))
+            
+            console.print(table)
+            console.print("\n[bold]SUCCESS:[/bold] The Cross-Layer Engine has successfully proved the identity bridge without relying on application-provided metrics!")
+    else:
+        console.print(f"[bold red]Failed to load map: {r.text}[/bold red]")
 
 # ---------------------------------------------------------------------------
 # OS Simulation Lab Functions
