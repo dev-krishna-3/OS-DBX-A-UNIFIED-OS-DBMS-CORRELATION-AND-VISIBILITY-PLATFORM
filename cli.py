@@ -20,6 +20,17 @@ def get_headers():
         return {"Authorization": f"Bearer {token}"}
     return {}
 
+def log_cli_action(action: str, details: str = ""):
+    if token:
+        try:
+            session.post(
+                f"{API_BASE_URL}/api/audit/",
+                json={"action": action, "details": details},
+                headers=get_headers()
+            )
+        except Exception:
+            pass
+
 def show_header():
     console.clear()
     console.print(Panel.fit("[bold cyan]OS-DBX Unified CLI Dashboard[/bold cyan]", border_style="cyan"))
@@ -510,6 +521,7 @@ def os_simulation_menu():
         console.print("[5] Back to Main Menu")
 
         choice = Prompt.ask("Choose an OS Simulation option", choices=["1", "2", "3", "4", "5"])
+        log_cli_action(f"OS Simulation Menu Option {choice}")
         if choice == "5":
             break
         elif choice == "1":
@@ -534,6 +546,564 @@ def os_simulation_menu():
             Prompt.ask("\nPress Enter to return to OS menu")
 
 
+def dbms_simulation_menu():
+    while True:
+        console.clear()
+        console.print(Panel.fit("[bold magenta]DBMS Simulation Lab[/bold magenta]", border_style="magenta"))
+        console.print("[1] Serializability & Conflict Graph Analysis")
+        console.print("[2] WAL Crash Recovery Simulator")
+        console.print("[3] 2PL Lock Manager (Begin/Read/Write/Commit)")
+        console.print("[4] Back to Main Menu")
+
+        choice = Prompt.ask("Choose a DBMS Simulation option", choices=["1", "2", "3", "4"])
+        log_cli_action(f"DBMS Simulation Menu Option {choice}")
+        if choice == "4":
+            break
+        elif choice == "1":
+            run_serializability_lab()
+            Prompt.ask("\nPress Enter to return")
+        elif choice == "2":
+            run_wal_recovery_lab()
+            Prompt.ask("\nPress Enter to return")
+        elif choice == "3":
+            run_2pl_lock_lab()
+            Prompt.ask("\nPress Enter to return")
+
+
+def run_serializability_lab():
+    console.print(Panel.fit("[bold cyan]Serializability & Conflict Graph Analysis[/bold cyan]", border_style="cyan"))
+    console.print("\nThis lab analyzes a transaction schedule for conflict serializability.")
+    console.print("It builds a precedence graph and detects cycles.\n")
+
+    use_preset = Prompt.ask("Use preset demo schedule?", choices=["yes", "no"], default="yes")
+
+    if use_preset == "yes":
+        operations = [
+            {"transaction_id": 1, "operation": "R", "data_item": "A"},
+            {"transaction_id": 2, "operation": "R", "data_item": "A"},
+            {"transaction_id": 1, "operation": "W", "data_item": "A"},
+            {"transaction_id": 2, "operation": "W", "data_item": "A"},
+            {"transaction_id": 1, "operation": "R", "data_item": "B"},
+            {"transaction_id": 2, "operation": "W", "data_item": "B"},
+        ]
+    else:
+        operations = []
+        console.print("[yellow]Enter operations (e.g. T1 R A). Type 'done' when finished.[/yellow]")
+        while True:
+            inp = Prompt.ask("Operation (e.g. T1 R A)")
+            if inp.strip().lower() == "done":
+                break
+            parts = inp.strip().split()
+            if len(parts) != 3:
+                console.print("[red]Format: T<id> R|W <data_item>[/red]")
+                continue
+            try:
+                tid = int(parts[0].replace("T", "").replace("t", ""))
+                operations.append({"transaction_id": tid, "operation": parts[1].upper(), "data_item": parts[2]})
+            except ValueError:
+                console.print("[red]Invalid transaction ID[/red]")
+
+    if not operations:
+        console.print("[yellow]No operations entered.[/yellow]")
+        return
+
+    with console.status("[bold blue]Analyzing schedule serializability..."):
+        r = session.post(f"{API_BASE_URL}/api/schedules/analyze", json={"operations": operations}, headers=get_headers())
+
+    if r.status_code == 200:
+        res = r.json()
+        sched_table = Table(title="Transaction Schedule")
+        sched_table.add_column("Step", justify="right", style="cyan")
+        sched_table.add_column("Transaction", style="yellow")
+        sched_table.add_column("Op", style="magenta")
+        sched_table.add_column("Data Item", style="green")
+        for i, op in enumerate(operations, 1):
+            sched_table.add_row(str(i), f"T{op['transaction_id']}", op['operation'], op['data_item'])
+        console.print(sched_table)
+
+        console.print("\n[bold cyan]Precedence Graph:[/bold cyan]")
+        graph = res.get("precedence_graph", {})
+        if graph:
+            for node, edges in graph.items():
+                if edges:
+                    edge_str = ", ".join([f"T{e}" for e in edges])
+                    console.print(f"  T{node} -> {edge_str}")
+                else:
+                    console.print(f"  T{node} -> (no outgoing edges)")
+        else:
+            console.print("  (empty graph)")
+
+        is_serializable = res.get("conflict_serializable", False)
+        cycles = res.get("cycles", [])
+        if is_serializable:
+            console.print(Panel("[bold green]CONFLICT SERIALIZABLE[/bold green]\nNo cycles in precedence graph.", border_style="green"))
+        else:
+            cycle_str = ", ".join([str(cycle) for cycle in cycles])
+            console.print(Panel(f"[bold red]NOT CONFLICT SERIALIZABLE[/bold red]\nCycles detected: {cycle_str}", border_style="red"))
+    else:
+        console.print(f"[bold red]Failed: {r.text}[/bold red]")
+
+
+def run_wal_recovery_lab():
+    console.print(Panel.fit("[bold cyan]WAL Crash Recovery Simulator[/bold cyan]", border_style="cyan"))
+    console.print("\nThis lab simulates ARIES-style UNDO/REDO crash recovery.")
+    console.print("Provide initial DB state + WAL log entries, then see which transactions get redone/undone.\n")
+
+    use_preset = Prompt.ask("Use preset crash scenario?", choices=["yes", "no"], default="yes")
+
+    if use_preset == "yes":
+        initial_state = {"A": "10", "B": "20", "C": "30"}
+        logs = [
+            {"sequence": 1, "transaction_id": 1, "log_type": "START"},
+            {"sequence": 2, "transaction_id": 1, "log_type": "WRITE", "data_item": "A", "old_value": "10", "new_value": "50"},
+            {"sequence": 3, "transaction_id": 2, "log_type": "START"},
+            {"sequence": 4, "transaction_id": 2, "log_type": "WRITE", "data_item": "B", "old_value": "20", "new_value": "80"},
+            {"sequence": 5, "transaction_id": 1, "log_type": "WRITE", "data_item": "C", "old_value": "30", "new_value": "70"},
+            {"sequence": 6, "transaction_id": 1, "log_type": "COMMIT"},
+        ]
+        console.print("[dim]Preset: T1 committed (A:10->50, C:30->70), T2 active at crash (B:20->80)[/dim]")
+    else:
+        initial_state = {}
+        console.print("[yellow]Enter initial state (e.g. A=10). Type 'done' when finished.[/yellow]")
+        while True:
+            inp = Prompt.ask("State (e.g. A=10)")
+            if inp.strip().lower() == "done":
+                break
+            parts = inp.strip().split("=")
+            if len(parts) == 2:
+                initial_state[parts[0].strip()] = parts[1].strip()
+
+        logs = []
+        seq = 1
+        console.print("[yellow]Enter WAL log entries. Type 'done' when finished.[/yellow]")
+        console.print("[dim]Formats: START <tid> | WRITE <tid> <item> <old> <new> | COMMIT <tid>[/dim]")
+        while True:
+            inp = Prompt.ask(f"Log #{seq}")
+            if inp.strip().lower() == "done":
+                break
+            parts = inp.strip().split()
+            entry = {"sequence": seq}
+            if parts[0].upper() == "START" and len(parts) >= 2:
+                entry.update({"transaction_id": int(parts[1]), "log_type": "START"})
+            elif parts[0].upper() == "WRITE" and len(parts) >= 5:
+                entry.update({"transaction_id": int(parts[1]), "log_type": "WRITE", "data_item": parts[2], "old_value": parts[3], "new_value": parts[4]})
+            elif parts[0].upper() == "COMMIT" and len(parts) >= 2:
+                entry.update({"transaction_id": int(parts[1]), "log_type": "COMMIT"})
+            else:
+                console.print("[red]Invalid format[/red]")
+                continue
+            logs.append(entry)
+            seq += 1
+
+    with console.status("[bold blue]Running WAL crash recovery..."):
+        r = session.post(f"{API_BASE_URL}/api/recovery/recover", json={"initial_state": initial_state, "logs": logs}, headers=get_headers())
+
+    if r.status_code == 200:
+        res = r.json()
+        log_table = Table(title="WAL Log Entries")
+        log_table.add_column("Seq", justify="right", style="cyan")
+        log_table.add_column("TxID", style="yellow")
+        log_table.add_column("Type", style="magenta")
+        log_table.add_column("Item", style="green")
+        log_table.add_column("Old->New")
+        for log_entry in logs:
+            item = log_entry.get("data_item", "-")
+            change = f"{log_entry.get('old_value', '')}->{log_entry.get('new_value', '')}" if log_entry.get("data_item") else "-"
+            log_table.add_row(str(log_entry["sequence"]), f"T{log_entry['transaction_id']}", log_entry["log_type"], item, change)
+        console.print(log_table)
+
+        console.print("\n[bold green]Recovery Results:[/bold green]")
+        committed = res.get('committed_transactions', [])
+        redone = res.get('redone_transactions', [])
+        undone = res.get('undone_transactions', [])
+        console.print(f"  Committed (REDO):  {['T'+str(t) for t in committed]}" if committed else "  Committed: (none)")
+        console.print(f"  Redone:            {['T'+str(t) for t in redone]}" if redone else "  Redone: (none)")
+        console.print(f"  Undone (ROLLBACK): {['T'+str(t) for t in undone]}" if undone else "  Undone: (none)")
+
+        state_table = Table(title="Final Database State After Recovery")
+        state_table.add_column("Item", style="cyan")
+        state_table.add_column("Initial", style="yellow")
+        state_table.add_column("Final", style="green")
+        final = res.get("final_state", {})
+        for k in sorted(set(list(initial_state.keys()) + list(final.keys()))):
+            state_table.add_row(k, initial_state.get(k, "?"), final.get(k, "?"))
+        console.print(state_table)
+    else:
+        console.print(f"[bold red]Failed: {r.text}[/bold red]")
+
+
+def run_2pl_lock_lab():
+    console.print(Panel.fit("[bold cyan]2PL Lock Manager & Transaction Lifecycle[/bold cyan]", border_style="cyan"))
+    console.print("\nThis lab lets you create transactions, acquire locks, read/write data items, commit/rollback.")
+    console.print("It enforces 2-Phase Locking (2PL) with Shared (S) and Exclusive (X) locks.\n")
+
+    while True:
+        console.print("[1] Begin Transaction")
+        console.print("[2] Acquire Lock")
+        console.print("[3] Read Data Item")
+        console.print("[4] Write Data Item")
+        console.print("[5] Commit Transaction")
+        console.print("[6] Rollback Transaction")
+        console.print("[7] Back")
+
+        choice = Prompt.ask("Choose", choices=["1", "2", "3", "4", "5", "6", "7"])
+        log_cli_action(f"2PL Lab Option {choice}")
+        if choice == "7":
+            break
+        elif choice == "1":
+            pid = IntPrompt.ask("Process ID (PID)")
+            iso = Prompt.ask("Isolation Level", choices=["READ_UNCOMMITTED", "READ_COMMITTED", "REPEATABLE_READ", "SERIALIZABLE"], default="READ_COMMITTED")
+            r = session.post(f"{API_BASE_URL}/api/transactions/begin", json={"pid": pid, "isolation_level": iso}, headers=get_headers())
+            if r.status_code == 201:
+                data = r.json()
+                console.print(f"[bold green]Transaction {data['transaction_id']} started (Status: {data['status']})[/bold green]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+        elif choice == "2":
+            txid = IntPrompt.ask("Transaction ID")
+            item = Prompt.ask("Data Item (e.g. A)")
+            ltype = Prompt.ask("Lock Type", choices=["S", "X"], default="X")
+            r = session.post(f"{API_BASE_URL}/api/locks", json={"transaction_id": txid, "data_item": item, "lock_type": ltype}, headers=get_headers())
+            if r.status_code == 201:
+                data = r.json()
+                console.print(f"[bold green]Lock {data['lock_id']} acquired: {data['lock_type']} on '{data['data_item']}' (Status: {data['status']})[/bold green]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+        elif choice == "3":
+            txid = IntPrompt.ask("Transaction ID")
+            item = Prompt.ask("Data Item to Read")
+            r = session.post(f"{API_BASE_URL}/api/transactions/{txid}/read", json={"data_item": item}, headers=get_headers())
+            if r.status_code == 200:
+                data = r.json()
+                console.print(f"[bold green]READ('{item}') by T{data['transaction_id']} at seq #{data['sequence_no']}[/bold green]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+        elif choice == "4":
+            txid = IntPrompt.ask("Transaction ID")
+            item = Prompt.ask("Data Item to Write")
+            r = session.post(f"{API_BASE_URL}/api/transactions/{txid}/write", json={"data_item": item}, headers=get_headers())
+            if r.status_code == 200:
+                data = r.json()
+                console.print(f"[bold green]WRITE('{item}') by T{data['transaction_id']} at seq #{data['sequence_no']}[/bold green]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+        elif choice == "5":
+            txid = IntPrompt.ask("Transaction ID")
+            r = session.post(f"{API_BASE_URL}/api/transactions/{txid}/commit", json={}, headers=get_headers())
+            if r.status_code == 200:
+                data = r.json()
+                console.print(f"[bold green]Transaction {data['transaction_id']} -> {data['status']}[/bold green]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+        elif choice == "6":
+            txid = IntPrompt.ask("Transaction ID")
+            r = session.post(f"{API_BASE_URL}/api/transactions/{txid}/rollback", json={}, headers=get_headers())
+            if r.status_code == 200:
+                data = r.json()
+                console.print(f"[bold yellow]Transaction {data['transaction_id']} -> {data['status']}[/bold yellow]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+        console.print()
+
+
+def what_if_menu():
+    while True:
+        console.clear()
+        console.print(Panel.fit("[bold magenta]What-If Scenario Replay Engine[/bold magenta]", border_style="magenta"))
+        console.print("[1] Run What-If Schedule Analysis (Serializability)")
+        console.print("[2] Run What-If Recovery Experiment (WAL Crash)")
+        console.print("[3] List Saved What-If Scenarios")
+        console.print("[4] View Scenario Details")
+        console.print("[5] Back to Main Menu")
+
+        choice = Prompt.ask("Choose", choices=["1", "2", "3", "4", "5"])
+        log_cli_action(f"What-If Menu Option {choice}")
+        if choice == "5":
+            break
+        elif choice == "1":
+            run_whatif_schedule()
+            Prompt.ask("\nPress Enter to return")
+        elif choice == "2":
+            run_whatif_recovery()
+            Prompt.ask("\nPress Enter to return")
+        elif choice == "3":
+            list_whatif_scenarios()
+            Prompt.ask("\nPress Enter to return")
+        elif choice == "4":
+            view_whatif_scenario()
+            Prompt.ask("\nPress Enter to return")
+
+
+def run_whatif_schedule():
+    name = Prompt.ask("Scenario Name", default="CLI-WhatIf-Schedule")
+    console.print("[yellow]Enter operations (e.g. T1 R A). Type 'done' when finished.[/yellow]")
+    console.print("[dim]Or press Enter immediately for preset demo.[/dim]")
+
+    operations = []
+    inp = Prompt.ask("First Operation (or Enter for preset)")
+    if not inp.strip():
+        operations = [
+            {"transaction_id": 1, "operation": "R", "data_item": "X"},
+            {"transaction_id": 2, "operation": "W", "data_item": "X"},
+            {"transaction_id": 1, "operation": "W", "data_item": "X"},
+            {"transaction_id": 2, "operation": "R", "data_item": "Y"},
+            {"transaction_id": 1, "operation": "W", "data_item": "Y"},
+        ]
+        console.print("[dim]Using preset: T1:R(X), T2:W(X), T1:W(X), T2:R(Y), T1:W(Y)[/dim]")
+    else:
+        parts = inp.strip().split()
+        if len(parts) == 3:
+            operations.append({"transaction_id": int(parts[0].replace("T","").replace("t","")), "operation": parts[1].upper(), "data_item": parts[2]})
+        while True:
+            inp = Prompt.ask("Operation (or 'done')")
+            if inp.strip().lower() == "done":
+                break
+            parts = inp.strip().split()
+            if len(parts) == 3:
+                operations.append({"transaction_id": int(parts[0].replace("T","").replace("t","")), "operation": parts[1].upper(), "data_item": parts[2]})
+
+    with console.status("[bold blue]Running What-If Schedule Analysis..."):
+        r = session.post(f"{API_BASE_URL}/api/what-if/schedules", json={"name": name, "operations": operations}, headers=get_headers())
+    if r.status_code == 201:
+        res = r.json()
+        console.print(f"\n[bold green]Scenario saved (ID: {res['scenario_id']})[/bold green]")
+        result = res.get("result", {})
+        is_ser = result.get("conflict_serializable", False)
+        if is_ser:
+            console.print(Panel("[bold green]CONFLICT SERIALIZABLE[/bold green]", border_style="green"))
+        else:
+            cycles = result.get("cycles", [])
+            console.print(Panel(f"[bold red]NOT SERIALIZABLE - Cycles: {cycles}[/bold red]", border_style="red"))
+    else:
+        console.print(f"[bold red]Failed: {r.text}[/bold red]")
+
+
+def run_whatif_recovery():
+    name = Prompt.ask("Scenario Name", default="CLI-WhatIf-Recovery")
+    console.print("[dim]Using preset crash scenario (T1 committed, T2 active at crash)[/dim]")
+
+    initial_state = {"A": "100", "B": "200"}
+    logs = [
+        {"sequence": 1, "transaction_id": 1, "log_type": "START"},
+        {"sequence": 2, "transaction_id": 1, "log_type": "WRITE", "data_item": "A", "old_value": "100", "new_value": "150"},
+        {"sequence": 3, "transaction_id": 2, "log_type": "START"},
+        {"sequence": 4, "transaction_id": 2, "log_type": "WRITE", "data_item": "B", "old_value": "200", "new_value": "350"},
+        {"sequence": 5, "transaction_id": 1, "log_type": "COMMIT"},
+    ]
+
+    with console.status("[bold blue]Running What-If Recovery Experiment..."):
+        r = session.post(f"{API_BASE_URL}/api/what-if/recovery", json={"name": name, "initial_state": initial_state, "logs": logs}, headers=get_headers())
+    if r.status_code == 201:
+        res = r.json()
+        console.print(f"\n[bold green]Scenario saved (ID: {res['scenario_id']})[/bold green]")
+        result = res.get("result", {})
+        console.print(f"  Redone:    {result.get('redone_transactions', [])}")
+        console.print(f"  Undone:    {result.get('undone_transactions', [])}")
+        console.print(f"  Committed: {result.get('committed_transactions', [])}")
+        console.print(f"  Final:     {result.get('final_state', {})}")
+    else:
+        console.print(f"[bold red]Failed: {r.text}[/bold red]")
+
+
+def list_whatif_scenarios():
+    with console.status("[bold blue]Fetching What-If Scenarios..."):
+        r = session.get(f"{API_BASE_URL}/api/what-if/scenarios?limit=20", headers=get_headers())
+    if r.status_code == 200:
+        scenarios = r.json()
+        if not scenarios:
+            console.print("[yellow]No What-If scenarios found.[/yellow]")
+            return
+        table = Table(title="Saved What-If Scenarios")
+        table.add_column("ID", justify="right", style="cyan")
+        table.add_column("Type", style="magenta")
+        table.add_column("Name", style="green")
+        table.add_column("Created", style="yellow")
+        for s in scenarios:
+            table.add_row(str(s["scenario_id"]), s["analysis_type"], s["name"], s["created_at"])
+        console.print(table)
+    else:
+        console.print(f"[bold red]Failed: {r.text}[/bold red]")
+
+
+def view_whatif_scenario():
+    sid = IntPrompt.ask("Scenario ID")
+    with console.status("[bold blue]Fetching Scenario..."):
+        r = session.get(f"{API_BASE_URL}/api/what-if/scenarios/{sid}", headers=get_headers())
+    if r.status_code == 200:
+        s = r.json()
+        console.print(Panel(f"[bold]{s['name']}[/bold] (Type: {s['analysis_type']}, ID: {s['scenario_id']})", border_style="cyan"))
+        console.print("\n[bold]Input Data:[/bold]")
+        for k, v in s.get("input_data", {}).items():
+            console.print(f"  {k}: {v}")
+        console.print("\n[bold]Result:[/bold]")
+        for k, v in s.get("result", {}).items():
+            console.print(f"  {k}: {v}")
+    elif r.status_code == 404:
+        console.print("[bold red]Scenario not found.[/bold red]")
+    else:
+        console.print(f"[bold red]Failed: {r.text}[/bold red]")
+
+
+def investigations_menu():
+    while True:
+        console.clear()
+        console.print(Panel.fit("[bold magenta]Incident Investigation & Replay[/bold magenta]", border_style="magenta"))
+        console.print("[1] Investigate Incident (Deep-Dive Root Cause)")
+        console.print("[2] Replay Incident (Forensic Replay)")
+        console.print("[3] Back to Main Menu")
+
+        choice = Prompt.ask("Choose", choices=["1", "2", "3"])
+        log_cli_action(f"Investigation Menu Option {choice}")
+        if choice == "3":
+            break
+        elif choice == "1":
+            incident_id = IntPrompt.ask("Incident ID to investigate")
+            with console.status("[bold blue]Running deep investigation..."):
+                r = session.get(f"{API_BASE_URL}/api/incidents/{incident_id}/investigation", headers=get_headers())
+            if r.status_code == 200:
+                inv = r.json()
+                incident = inv.get("incident", {})
+                console.print(Panel(
+                    f"[bold]Incident #{incident.get('incident_id', incident_id)}[/bold]\n"
+                    f"Type: {incident.get('incident_type', 'N/A')}\n"
+                    f"Description: {incident.get('description', 'N/A')}\n"
+                    f"Severity: {incident.get('severity', 'N/A')}",
+                    border_style="red",
+                    title="Incident Details"
+                ))
+                timeline = inv.get("timeline", [])
+                if timeline:
+                    tl_table = Table(title="Investigation Timeline")
+                    tl_table.add_column("Seq", justify="right", style="cyan")
+                    tl_table.add_column("Source", style="magenta")
+                    tl_table.add_column("Event", style="yellow")
+                    tl_table.add_column("Description", style="green")
+                    for entry in timeline:
+                        tl_table.add_row(str(entry["sequence"]), entry["source"], entry["event_type"], entry["description"])
+                    console.print(tl_table)
+                perf = inv.get("performance", [])
+                if perf:
+                    console.print(f"\n[bold]Performance Records:[/bold] {len(perf)} entries collected")
+            elif r.status_code == 404:
+                console.print("[bold red]Incident not found.[/bold red]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+            Prompt.ask("\nPress Enter to return")
+        elif choice == "2":
+            incident_id = IntPrompt.ask("Incident ID to replay")
+            with console.status("[bold blue]Replaying incident..."):
+                r = session.post(f"{API_BASE_URL}/api/incidents/{incident_id}/replay", json={}, headers=get_headers())
+            if r.status_code == 200:
+                replay = r.json()
+                console.print(Panel(
+                    f"[bold green]Replay Complete[/bold green]\n"
+                    f"Replay ID: {replay.get('replay_id')}\n"
+                    f"Outcome: {replay.get('outcome')}\n"
+                    f"Summary: {replay.get('summary')}",
+                    border_style="green"
+                ))
+                steps = replay.get("steps", [])
+                if steps:
+                    st_table = Table(title="Replay Steps")
+                    st_table.add_column("Seq", justify="right", style="cyan")
+                    st_table.add_column("Source", style="magenta")
+                    st_table.add_column("Event", style="yellow")
+                    st_table.add_column("Description", style="green")
+                    for step in steps:
+                        st_table.add_row(str(step["sequence"]), step["source"], step["event_type"], step["description"])
+                    console.print(st_table)
+            elif r.status_code == 404:
+                console.print("[bold red]Incident not found.[/bold red]")
+            elif r.status_code == 409:
+                console.print(f"[bold yellow]Replay unavailable: {r.json().get('detail', '')}[/bold yellow]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+            Prompt.ask("\nPress Enter to return")
+
+
+def performance_menu():
+    while True:
+        console.clear()
+        console.print(Panel.fit("[bold magenta]Performance & Bottleneck Analysis[/bold magenta]", border_style="magenta"))
+        console.print("[1] View Recent Performance Records")
+        console.print("[2] Record New Performance Metric")
+        console.print("[3] Back to Main Menu")
+
+        choice = Prompt.ask("Choose", choices=["1", "2", "3"])
+        log_cli_action(f"Performance Menu Option {choice}")
+        if choice == "3":
+            break
+        elif choice == "1":
+            with console.status("[bold blue]Fetching Performance Records..."):
+                r = session.get(f"{API_BASE_URL}/api/performance/records?limit=25", headers=get_headers())
+            if r.status_code == 200:
+                records = r.json()
+                if not records:
+                    console.print("[yellow]No performance records found.[/yellow]")
+                else:
+                    table = Table(title="Performance Records")
+                    table.add_column("ID", justify="right", style="cyan")
+                    table.add_column("Metric", style="green")
+                    table.add_column("Value", justify="right", style="yellow")
+                    table.add_column("Trace ID", style="magenta")
+                    table.add_column("Recorded At", style="dim")
+                    for rec in records:
+                        table.add_row(
+                            str(rec["record_id"]),
+                            rec["metric_name"],
+                            f"{rec['metric_value']:.2f}",
+                            str(rec.get("trace_id") or "-"),
+                            rec["recorded_at"]
+                        )
+                    console.print(table)
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+            Prompt.ask("\nPress Enter to return")
+        elif choice == "2":
+            metric_name = Prompt.ask("Metric Name (e.g. query_latency_ms)")
+            metric_value = float(Prompt.ask("Metric Value"))
+            trace_id_str = Prompt.ask("Trace ID (optional, Enter to skip)", default="")
+            payload = {"metric_name": metric_name, "metric_value": metric_value}
+            if trace_id_str.strip():
+                payload["trace_id"] = int(trace_id_str)
+            r = session.post(f"{API_BASE_URL}/api/performance/records", json=payload, headers=get_headers())
+            if r.status_code == 201:
+                rec = r.json()
+                console.print(f"[bold green]Performance record created (ID: {rec['record_id']})[/bold green]")
+            else:
+                console.print(f"[bold red]Failed: {r.text}[/bold red]")
+            Prompt.ask("\nPress Enter to return")
+
+
+def admin_audit_logs():
+    with console.status("[bold blue]Fetching Audit Logs..."):
+        r = session.get(f"{API_BASE_URL}/api/audit/", headers=get_headers())
+        if r.status_code == 200:
+            logs = r.json()
+            if not logs:
+                console.print("[bold yellow]No audit logs found.[/bold yellow]")
+            else:
+                table = Table(title="Admin Audit Logs")
+                table.add_column("ID", style="cyan", justify="right")
+                table.add_column("Timestamp", style="magenta")
+                table.add_column("User", style="green")
+                table.add_column("Action", style="yellow")
+                for log in logs:
+                    table.add_row(
+                        str(log["id"]),
+                        log["timestamp"],
+                        f"{log['username']} (UID: {log['user_id']})",
+                        log["action"]
+                    )
+                console.print(table)
+        elif r.status_code == 403:
+            console.print("[bold red]Access Denied: Admin privileges required to view logs.[/bold red]")
+        else:
+            console.print(f"[bold red]Failed to fetch audit logs: {r.text}[/bold red]")
+    Prompt.ask("\nPress Enter to return")
+
+
+
 def main_menu():
     while True:
         show_header()
@@ -547,19 +1117,25 @@ def main_menu():
         except:
             pass
 
-        console.print("[1] View Live DBMS Observations (Query Fetcher)")
-        console.print("[2] View Recent Deadlocks & Incidents")
-        console.print("[3] Real-Time Cross-Layer OS-DBMS Correlation Engine")
-        console.print("[4] Incident Blast Radius & Causality Analysis")
-        console.print("[5] Run Live Benchmark Simulator (OS + DBMS Load)")
-        console.print("[6] Collect OS-DB Events (Ping Performance Schema)")
-        console.print("[7] OS Simulation Lab (Scheduling, Memory, Deadlocks)")
-        console.print("[8] Logout / Exit")
+        console.print("[1]  View Live DBMS Observations (Query Fetcher)")
+        console.print("[2]  View Recent Deadlocks & Incidents")
+        console.print("[3]  Real-Time Cross-Layer OS-DBMS Correlation Engine")
+        console.print("[4]  Incident Blast Radius & Causality Analysis")
+        console.print("[5]  Run Live Benchmark Simulator (OS + DBMS Load)")
+        console.print("[6]  Collect OS-DB Events (Ping Performance Schema)")
+        console.print("[7]  OS Simulation Lab (Scheduling, Memory, Deadlocks)")
+        console.print("[8]  DBMS Simulation Lab (Serializability, WAL, 2PL)")
+        console.print("[9]  What-If Scenario Replay Engine")
+        console.print("[10] Incident Investigation & Replay")
+        console.print("[11] Performance & Bottleneck Analysis")
+        console.print("[12] Admin Audit Logs Viewer")
+        console.print("[13] Logout / Exit")
         
-        choice = Prompt.ask("Choose an action", choices=["1", "2", "3", "4", "5", "6", "7", "8"])
+        choice = Prompt.ask("Choose an action", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"])
+        log_cli_action(f"Main Menu Option {choice}")
         
         console.clear()
-        if choice == "8":
+        if choice == "13":
             console.print("[bold yellow]Logging out...[/bold yellow]")
             sys.exit(0)
             
@@ -595,6 +1171,21 @@ def main_menu():
 
         elif choice == "7":
             os_simulation_menu()
+            
+        elif choice == "8":
+            dbms_simulation_menu()
+
+        elif choice == "9":
+            what_if_menu()
+
+        elif choice == "10":
+            investigations_menu()
+
+        elif choice == "11":
+            performance_menu()
+            
+        elif choice == "12":
+            admin_audit_logs()
 
 if __name__ == "__main__":
     try:
