@@ -53,13 +53,16 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     skipped and both ``application.state.os_adapter`` and
     ``application.state.os_event_stream`` are set to ``None``.
     """
+    import asyncio
+    from app.config.database import get_connection
+
+    consumer_task = None
+    
     try:
         from osdbx.adapters import WindowsAdapter  # type: ignore[import]
         from osdbx.stream import EventStream  # type: ignore[import]
 
         os_event_stream = EventStream()
-        # watch_paths should be configured via settings or environment variable.
-        # An empty list means the adapter monitors process events only.
         adapter = WindowsAdapter(
             stream=os_event_stream,
             watch_paths=getattr(settings, "os_watch_paths", []),
@@ -67,13 +70,42 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         adapter.start()
         application.state.os_event_stream = os_event_stream
         application.state.os_adapter = adapter
+        
+        async def _consume_stream():
+            while True:
+                try:
+                    events = os_event_stream.consume(block=False)
+                    if events:
+                        conn = get_connection()
+                        try:
+                            cursor = conn.cursor()
+                            for ev in events:
+                                cursor.execute(
+                                    "INSERT INTO os_events (pid, event_type, timestamp, file_path) VALUES (%s, %s, %s, %s)",
+                                    (ev.get("pid"), ev.get("event_type"), ev.get("timestamp"), ev.get("file_path"))
+                                )
+                            conn.commit()
+                            cursor.close()
+                        except Exception as e:
+                            conn.rollback()
+                        finally:
+                            conn.close()
+                    await asyncio.sleep(0.05)
+                except asyncio.CancelledError:
+                    break
+                except Exception:
+                    await asyncio.sleep(0.1)
+
+        consumer_task = asyncio.create_task(_consume_stream())
+
     except ImportError:
-        # Package not installed — adapter functionality unavailable.
-        # The /health endpoint will reflect this; ingest routes still work.
         application.state.os_event_stream = None
         application.state.os_adapter = None
 
     yield  # Application runs here.
+
+    if consumer_task:
+        consumer_task.cancel()
 
     # Shutdown: stop the adapter if it was started.
     adapter = getattr(application.state, "os_adapter", None)

@@ -16,10 +16,10 @@ class PerformanceRepository:
             cursor.execute(
                 """
                 INSERT INTO performance_records
-                    (trace_id, metric_name, metric_value, recorded_at)
-                VALUES (%s, %s, %s, %s)
+                    (trace_id, metric_name, metric_value, data_source, recorded_at)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
-                (request.trace_id, request.metric_name, request.metric_value, recorded_at),
+                (request.trace_id, request.metric_name, request.metric_value, request.data_source, recorded_at),
             )
             record_id = int(cursor.lastrowid)
             self.connection.commit()
@@ -28,6 +28,7 @@ class PerformanceRepository:
                 trace_id=request.trace_id,
                 metric_name=request.metric_name,
                 metric_value=request.metric_value,
+                data_source=request.data_source,
                 recorded_at=recorded_at,
             )
         except Exception:
@@ -40,7 +41,7 @@ class PerformanceRepository:
         cursor = self.connection.cursor(dictionary=True)
         try:
             query = """
-                SELECT record_id, trace_id, metric_name, metric_value, recorded_at
+                SELECT record_id, trace_id, metric_name, metric_value, data_source, recorded_at
                 FROM performance_records
             """
             params: tuple = ()

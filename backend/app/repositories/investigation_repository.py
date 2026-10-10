@@ -248,7 +248,7 @@ class InvestigationRepository:
         try:
             cursor.execute(
                 """
-                SELECT record_id, trace_id, metric_name, metric_value, recorded_at
+                SELECT record_id, trace_id, metric_name, metric_value, data_source, recorded_at
                 FROM performance_records
                 WHERE trace_id = %s
                 ORDER BY recorded_at, record_id

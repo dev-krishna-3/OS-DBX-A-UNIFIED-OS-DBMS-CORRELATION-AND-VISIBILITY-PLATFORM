@@ -9,6 +9,7 @@ class PerformanceRecordCreate(BaseModel):
     trace_id: PositiveInt | None = None
     metric_name: str = Field(min_length=1, max_length=100)
     metric_value: float = Field(allow_inf_nan=False)
+    data_source: str = Field(default="SIMULATION", max_length=50)
     recorded_at: datetime | None = None
 
 

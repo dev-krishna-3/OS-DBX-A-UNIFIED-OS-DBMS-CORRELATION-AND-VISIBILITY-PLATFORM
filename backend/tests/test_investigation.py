@@ -70,4 +70,56 @@ def test_replay_api_returns_actionable_conflict_for_missing_trace():
         app.dependency_overrides.pop(get_investigation_repository, None)
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Incident has no linked cross-layer trace"
+    assert response.json()["detail"] == "No cross-layer trace available — replay cannot be performed."
+
+
+def test_replay_api_succeeds_with_valid_trace():
+    valid_incident = INCIDENT.model_copy(update={"trace_id": 101})
+    investigation = IncidentInvestigation(
+        incident=valid_incident,
+        trace={"trace_id": 101, "status": "CORRELATED"},
+        timeline=[
+            InvestigationTimelineEntry(
+                sequence=1,
+                source="trace",
+                source_id=101,
+                event_type="TRACE_STARTED",
+                description="trace began",
+            ),
+            InvestigationTimelineEntry(
+                sequence=2,
+                source="correlation",
+                source_id=1,
+                event_type="CORRELATION",
+                description="correlated event",
+            ),
+        ],
+    )
+
+    class FakeSuccessRepository:
+        def investigate(self, incident_id):
+            return investigation
+
+        def save_replay(self, inv):
+            from app.models.investigation import IncidentReplay
+            return IncidentReplay(
+                replay_id=99,
+                incident_id=inv.incident.incident_id,
+                replayed_at=datetime(2026, 10, 3, 12, 5),
+                outcome="REPLAYED",
+                steps=inv.timeline,
+                summary="Replay simulated successfully",
+            )
+
+    app.dependency_overrides[get_investigation_repository] = lambda: FakeSuccessRepository()
+    try:
+        response = TestClient(app).post("/api/incidents/41/replay")
+    finally:
+        app.dependency_overrides.pop(get_investigation_repository, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["outcome"] == "REPLAYED"
+    assert data["replay_id"] == 99
+    assert len(data["steps"]) == 2
+

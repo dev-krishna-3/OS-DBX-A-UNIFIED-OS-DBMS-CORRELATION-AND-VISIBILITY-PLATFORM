@@ -12,7 +12,7 @@ class AutoCorrelationRepository:
         try:
             cursor.execute(
                 """
-                SELECT observation_id, query_type, query_text, observed_at
+                SELECT observation_id, connection_id, query_type, query_text, observed_at
                 FROM dbms_query_observations
                 WHERE observation_id = %s
                 """,

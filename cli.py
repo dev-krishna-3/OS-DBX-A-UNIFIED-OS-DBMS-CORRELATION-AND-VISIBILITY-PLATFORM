@@ -51,8 +51,12 @@ def check_health():
         else:
             console.print(f"[bold red]✖ Backend returned status code {r.status_code}[/bold red]")
             return False
-    except requests.ConnectionError:
+    except (requests.ConnectionError, requests.ReadTimeout, requests.Timeout,
+            requests.exceptions.RequestException):
         console.print("[bold red]✖ Cannot connect to backend (http://127.0.0.1:8000). Is it running?[/bold red]")
+        console.print("[dim]Start the backend first:[/dim]")
+        console.print("[dim]  $env:PYTHONPATH = 'backend'[/dim]")
+        console.print("[dim]  .\\backend\\venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000[/dim]")
         return False
 
 def login_menu():
@@ -63,8 +67,22 @@ def login_menu():
             sys.exit(1)
             
         console.print("\n[1] Login")
+        console.print("    [dim]WHAT: Authenticate user session with JWT credentials.[/dim]")
+        console.print("    [dim]WHY : Access secure monitoring, tracing, and investigation endpoints.[/dim]")
+        console.print("    [dim]RESULT: [LIVE] JWT access token stored in session.[/dim]")
+        console.print("    [dim]LINK: Users table → OAuth2 security context.[/dim]\n")
+        
         console.print("[2] Register New User")
+        console.print("    [dim]WHAT: Create a new database account with Linux UID mapping.[/dim]")
+        console.print("    [dim]WHY : Map real OS UID to database role.[/dim]")
+        console.print("    [dim]RESULT: [LIVE] New user row persisted.[/dim]")
+        console.print("    [dim]LINK: users table (username, uid_linux, password_hash).[/dim]\n")
+        
         console.print("[3] Exit")
+        console.print("    [dim]WHAT: Terminate CLI session.[/dim]")
+        console.print("    [dim]WHY : Safely close all active connections and exit.[/dim]")
+        console.print("    [dim]RESULT: Immediate graceful termination.[/dim]")
+        console.print("    [dim]LINK: Local process teardown.[/dim]\n")
         
         choice = Prompt.ask("Choose an option", choices=["1", "2", "3"])
         
@@ -78,14 +96,13 @@ def login_menu():
                 if r.status_code == 200:
                     token = r.json()["access_token"]
                     console.print("[bold green]Login successful![/bold green]")
-                    time.sleep(1)
                     return
                 else:
                     console.print("[bold red]Invalid credentials. Try again.[/bold red]")
-                    time.sleep(2)
+                    Prompt.ask("Press Enter to continue")
             except Exception as e:
                 console.print(f"[bold red]Error: {e}[/bold red]")
-                time.sleep(2)
+                Prompt.ask("Press Enter to continue")
         elif choice == "2":
             username = Prompt.ask("New Username")
             uid_linux = IntPrompt.ask("Linux UID (e.g. 1000)")
@@ -100,10 +117,10 @@ def login_menu():
                     console.print("[bold green]Registration successful! You can now login.[/bold green]")
                 else:
                     console.print(f"[bold red]Registration failed: {r.json()}[/bold red]")
-                time.sleep(2)
+                Prompt.ask("Press Enter to continue")
             except Exception as e:
                 console.print(f"[bold red]Error: {e}[/bold red]")
-                time.sleep(2)
+                Prompt.ask("Press Enter to continue")
 
 def fetch_dbms_observations():
     with console.status("[bold green]Fetching DBMS Observations..."):
@@ -359,11 +376,27 @@ def cross_layer_correlation_menu():
     while True:
         console.clear()
         console.print(Panel.fit("[bold cyan]Real-Time Cross-Layer OS-DBMS Correlation Engine[/bold cyan]", border_style="cyan"))
+        
         console.print("[1] Execute Real-Time Event Correlation (OS PID + Transaction + Query)")
+        console.print("    [dim]Correlates raw OS events to DB queries using identity and time to trace the exact OS process.[/dim]")
+        console.print("    [dim]-> Persists to cross_layer_traces & event_correlations tables.[/dim]\n")
+        
         console.print("[2] Run DBMS-OS Auto-Correlation Engine (Match Observations to OS Events)")
+        console.print("    [dim]Automatically finds matching OS events for a DB observation using Identity Bridge.[/dim]")
+        console.print("    [dim]-> Displays true PIDs and links correlation to the API.[/dim]\n")
+        
         console.print("[3] Compute Incident Blast Radius & Causality Impact")
+        console.print("    [dim]Calculates which systems were affected by an incident to assess true impact.[/dim]")
+        console.print("    [dim]-> Saves an impact radius graph to the incident investigation timeline.[/dim]\n")
+        
         console.print("[4] Run Engine Verification Live Demo")
+        console.print("    [dim]Runs a self-diagnostic test on the correlation engine to verify deterministic rules.[/dim]")
+        console.print("    [dim]-> Displays PASS/FAIL for each rule on screen (not persisted).[/dim]\n")
+        
         console.print("[5] View Live Identity Bridge Map (OS PIDs <-> MySQL Connections)")
+        console.print("    [dim]Scans OS TCP sockets and maps them to MySQL processlist to prove the system relationship.[/dim]")
+        console.print("    [dim]-> Shows a live 1-to-1 mapping table (not persisted).[/dim]\n")
+        
         console.print("[6] Back to Main Menu")
 
         choice = Prompt.ask("Choose a Correlation Engine option", choices=["1", "2", "3", "4", "5", "6"])
@@ -406,7 +439,7 @@ def run_identity_bridge_live_map():
                 password=settings.mysql_password,
                 database=settings.mysql_database
             )
-            time.sleep(0.5)
+            time.sleep(0.05)
         except Exception as err:
             console.print(f"[dim yellow]Notice: Could not establish demo connection ({err}), scanning existing sockets instead.[/dim yellow]")
 
@@ -606,10 +639,23 @@ def os_simulation_menu():
     while True:
         console.clear()
         console.print(Panel.fit("[bold magenta]OS Simulation & Work Analysis Lab[/bold magenta]", border_style="magenta"))
+        
         console.print("[1] CPU Scheduling Simulator (FCFS, SJF, SRTF, Round Robin, Priority)")
+        console.print("    [dim]Simulates OS process scheduling algorithms to test how different schedulers handle concurrent DB transactions.[/dim]")
+        console.print("    [dim]-> Shows a Gantt chart and waiting/turnaround time metrics (not persisted).[/dim]\n")
+        
         console.print("[2] Memory Page Replacement Lab (FIFO, LRU, Optimal)")
+        console.print("    [dim]Simulates memory page faults and replacement to analyze buffer pool and virtual memory eviction behaviors.[/dim]")
+        console.print("    [dim]-> Displays page fault rates for requested algorithms (not persisted).[/dim]\n")
+        
         console.print("[3] Deadlock Analysis (Banker's Algorithm & Resource Allocation Graph)")
+        console.print("    [dim]Simulates resource allocation deadlock avoidance and detection to analyze whether a given resource state is safe or deadlocked.[/dim]")
+        console.print("    [dim]-> Displays safe sequence or detected deadlock cycles (not persisted).[/dim]\n")
+        
         console.print("[4] View OS Live Stream Collector Metrics & Health")
+        console.print("    [dim]Shows real-time metrics from the Windows OS Adapter to verify the background stream buffer is not dropping events.[/dim]")
+        console.print("    [dim]-> Displays buffer capacity, ingested, and dropped event counts (reads directly from stream state).[/dim]\n")
+        
         console.print("[5] Back to Main Menu")
 
         choice = Prompt.ask("Choose an OS Simulation option", choices=["1", "2", "3", "4", "5"])
@@ -642,9 +688,19 @@ def dbms_simulation_menu():
     while True:
         console.clear()
         console.print(Panel.fit("[bold magenta]DBMS Simulation Lab[/bold magenta]", border_style="magenta"))
+        
         console.print("[1] Serializability & Conflict Graph Analysis")
+        console.print("    [dim]Checks if a transaction schedule is conflict serializable to detect isolation anomalies.[/dim]")
+        console.print("    [dim]-> Displays a precedence graph and cycle detection result (not persisted).[/dim]\n")
+        
         console.print("[2] WAL Crash Recovery Simulator")
+        console.print("    [dim]Simulates ARIES-style UNDO/REDO crash recovery to verify database consistency after an OS crash.[/dim]")
+        console.print("    [dim]-> Shows committed, redone, and undone transactions (not persisted).[/dim]\n")
+        
         console.print("[3] 2PL Lock Manager (Begin/Read/Write/Commit)")
+        console.print("    [dim]Interactive simulation of Two-Phase Locking (2PL) to observe how locks prevent concurrent anomalies.[/dim]")
+        console.print("    [dim]-> Tracks lock acquisition and transaction state changes (not persisted).[/dim]\n")
+        
         console.print("[4] Back to Main Menu")
 
         choice = Prompt.ask("Choose a DBMS Simulation option", choices=["1", "2", "3", "4"])
@@ -902,10 +958,23 @@ def what_if_menu():
     while True:
         console.clear()
         console.print(Panel.fit("[bold magenta]What-If Scenario Replay Engine[/bold magenta]", border_style="magenta"))
+        
         console.print("[1] Run What-If Schedule Analysis (Serializability)")
+        console.print("    [dim]Check whether a transaction schedule is serializable to predict if an expected workload will cause anomalies.[/dim]")
+        console.print("    [dim]-> Saves the result as a scenario for later investigation in the what_if_scenarios table.[/dim]\n")
+        
         console.print("[2] Run What-If Recovery Experiment (WAL Crash)")
+        console.print("    [dim]Test REDO/UNDO behavior after a simulated failure to verify disaster recovery plans.[/dim]")
+        console.print("    [dim]-> Saves recovery results for review in the what_if_scenarios table.[/dim]\n")
+        
         console.print("[3] List Saved What-If Scenarios")
+        console.print("    [dim]Lists previously saved What-If analysis scenarios to review past predictions and experiments.[/dim]")
+        console.print("    [dim]-> Shows a table of scenarios with IDs and timestamps.[/dim]\n")
+        
         console.print("[4] View Scenario Details")
+        console.print("    [dim]Displays the full input and result of a specific scenario to examine the exact graph/cycles or recovery state.[/dim]")
+        console.print("    [dim]-> Shows formatted JSON of the scenario.[/dim]\n")
+        
         console.print("[5] Back to Main Menu")
 
         choice = Prompt.ask("Choose", choices=["1", "2", "3", "4", "5"])
@@ -1040,8 +1109,15 @@ def investigations_menu():
     while True:
         console.clear()
         console.print(Panel.fit("[bold magenta]Incident Investigation & Replay[/bold magenta]", border_style="magenta"))
+        
         console.print("[1] Investigate Incident (Deep-Dive Root Cause)")
+        console.print("    [dim]Loads the full cross-layer timeline for an incident to trace a deadlock or crash back to the exact OS event.[/dim]")
+        console.print("    [dim]-> Displays a chronological event timeline and performance records (reads from DB).[/dim]\n")
+        
         console.print("[2] Replay Incident (Forensic Replay)")
+        console.print("    [dim]Saves a forensic snapshot of an incident timeline to freeze the state of an investigation for later review.[/dim]")
+        console.print("    [dim]-> Creates an immutable replay record in the incident_replays table.[/dim]\n")
+        
         console.print("[3] Back to Main Menu")
 
         choice = Prompt.ask("Choose", choices=["1", "2", "3"])
@@ -1117,8 +1193,15 @@ def performance_menu():
     while True:
         console.clear()
         console.print(Panel.fit("[bold magenta]Performance & Bottleneck Analysis[/bold magenta]", border_style="magenta"))
+        
         console.print("[1] View Recent Performance Records")
+        console.print("    [dim]Displays the latest system and query performance metrics to identify slow queries or system bottlenecks.[/dim]")
+        console.print("    [dim]-> Shows a table of metrics and their source (reads from performance_records).[/dim]\n")
+        
         console.print("[2] Record New Performance Metric")
+        console.print("    [dim]Manually inserts a test performance metric to simulate load or test the performance tracking system.[/dim]")
+        console.print("    [dim]-> Saves the metric with a SIMULATION tag to the performance_records table.[/dim]\n")
+        
         console.print("[3] Back to Main Menu")
 
         choice = Prompt.ask("Choose", choices=["1", "2", "3"])
@@ -1137,13 +1220,16 @@ def performance_menu():
                     table.add_column("ID", justify="right", style="cyan")
                     table.add_column("Metric", style="green")
                     table.add_column("Value", justify="right", style="yellow")
+                    table.add_column("Source", style="bold red")
                     table.add_column("Trace ID", style="magenta")
                     table.add_column("Recorded At", style="dim")
                     for rec in records:
+                        source_style = "bold red" if rec.get("data_source") != "LIVE" else "bold green"
                         table.add_row(
                             str(rec["record_id"]),
                             rec["metric_name"],
                             f"{rec['metric_value']:.2f}",
+                            f"[{source_style}]{rec.get('data_source', 'SIMULATION')}[/{source_style}]",
                             str(rec.get("trace_id") or "-"),
                             rec["recorded_at"]
                         )
@@ -1196,32 +1282,73 @@ def admin_audit_logs():
 
 
 
+_cached_user = None
+
 def main_menu():
+    global _cached_user
     while True:
         show_header()
         
-        # Get User details
-        try:
-            r = session.get(f"{API_BASE_URL}/api/auth/me", headers=get_headers())
-            if r.status_code == 200:
-                user = r.json()
-                console.print(f"Logged in as: [bold yellow]{user['username']}[/bold yellow] (UID: {user['uid_linux']})\n")
-        except:
-            pass
+        # Get User details (cached to avoid repeated network overhead)
+        if not _cached_user:
+            try:
+                r = session.get(f"{API_BASE_URL}/api/auth/me", headers=get_headers())
+                if r.status_code == 200:
+                    _cached_user = r.json()
+            except:
+                pass
+        if _cached_user:
+            console.print(f"Logged in as: [bold yellow]{_cached_user['username']}[/bold yellow] (UID: {_cached_user['uid_linux']})\n")
 
-        console.print("[1]  View Live DBMS Observations (Query Fetcher)")
-        console.print("[2]  View Recent Deadlocks & Incidents")
-        console.print("[3]  Real-Time Cross-Layer OS-DBMS Correlation Engine")
-        console.print("[4]  Incident Blast Radius & Causality Analysis")
-        console.print("[5]  Run Live Benchmark Simulator (OS + DBMS Load)")
-        console.print("[6]  Collect OS-DB Events (Ping Performance Schema)")
-        console.print("[7]  OS Simulation Lab (Scheduling, Memory, Deadlocks)")
-        console.print("[8]  DBMS Simulation Lab (Serializability, WAL, 2PL)")
-        console.print("[9]  What-If Scenario Replay Engine")
+        console.print("[1] View Live DBMS Observations (Query Fetcher)")
+        console.print("    [dim]Fetches recent live DBMS queries to monitor DB activity.[/dim]")
+        console.print("    [dim]-> Reads from dbms_query_observations table.[/dim]\n")
+        
+        console.print("[2] View Recent Deadlocks & Incidents")
+        console.print("    [dim]Displays recent deadlock and crash incidents to monitor system stability.[/dim]")
+        console.print("    [dim]-> Reads from incidents table.[/dim]\n")
+        
+        console.print("[3] Real-Time Cross-Layer OS-DBMS Correlation Engine")
+        console.print("    [dim]Opens the correlation engine menu to trace OS processes to DB queries.[/dim]")
+        console.print("    [dim]-> Navigates to Correlation Submenu.[/dim]\n")
+        
+        console.print("[4] Incident Blast Radius & Causality Analysis")
+        console.print("    [dim]Calculates affected systems for an incident to assess impact.[/dim]")
+        console.print("    [dim]-> Shows impact graph (reads from trace dependencies).[/dim]\n")
+        
+        console.print("[5] Run Live Benchmark Simulator (OS + DBMS Load)")
+        console.print("    [dim]Triggers a load test on the database to generate metrics.[/dim]")
+        console.print("    [dim]-> Executes DB transactions and logs performance stats.[/dim]\n")
+        
+        console.print("[6] Collect OS-DB Events (Ping Performance Schema)")
+        console.print("    [dim]Polls the MySQL performance schema to manually ingest new queries.[/dim]")
+        console.print("    [dim]-> Saves new observations to the database.[/dim]\n")
+        
+        console.print("[7] OS Simulation Lab (Scheduling, Memory, Deadlocks)")
+        console.print("    [dim]Opens the OS simulator to test algorithms and view collector health.[/dim]")
+        console.print("    [dim]-> Navigates to OS Simulation Submenu.[/dim]\n")
+        
+        console.print("[8] DBMS Simulation Lab (Serializability, WAL, 2PL)")
+        console.print("    [dim]Opens the DBMS simulator to test concurrency and recovery.[/dim]")
+        console.print("    [dim]-> Navigates to DBMS Simulation Submenu.[/dim]\n")
+        
+        console.print("[9] What-If Scenario Replay Engine")
+        console.print("    [dim]Opens the What-If engine to test hypothetical workloads and crashes.[/dim]")
+        console.print("    [dim]-> Navigates to What-If Submenu.[/dim]\n")
+        
         console.print("[10] Incident Investigation & Replay")
+        console.print("    [dim]Opens the investigation tools to analyze and replay past incidents.[/dim]")
+        console.print("    [dim]-> Navigates to Investigation Submenu.[/dim]\n")
+        
         console.print("[11] Performance & Bottleneck Analysis")
+        console.print("    [dim]Opens the performance dashboard to review system latency metrics.[/dim]")
+        console.print("    [dim]-> Navigates to Performance Submenu.[/dim]\n")
+        
         console.print("[12] Admin Audit Logs Viewer")
-        console.print("[13] Logout / Exit")
+        console.print("    [dim]Displays a history of all CLI actions to monitor user activity.[/dim]")
+        console.print("    [dim]-> Reads from audit_logs table.[/dim]\n")
+        
+        console.print("[13] Logout / Exit\n")
         
         choice = Prompt.ask("Choose an action", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"])
         log_cli_action(f"Main Menu Option {choice}")

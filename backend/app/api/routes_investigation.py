@@ -45,6 +45,6 @@ def replay_incident(
     except IncidentNotFoundError as error:
         raise HTTPException(status_code=404, detail="Incident not found") from error
     except ReplayUnavailableError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        raise HTTPException(status_code=409, detail="No cross-layer trace available — replay cannot be performed.") from error
     except mysql.connector.Error as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
