@@ -1,5 +1,11 @@
 import os
 import sys
+
+# Ensure backend directory is importable
+_backend_dir = os.path.join(os.path.dirname(__file__), "backend")
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
+
 import time
 import datetime
 import requests
@@ -247,7 +253,30 @@ def run_cross_layer_correlation():
 
 def run_auto_correlation():
     console.print("\n[bold cyan]--- DBMS-OS Auto-Correlation Engine ---[/bold cyan]")
-    obs_id = IntPrompt.ask("Enter DBMS Observation ID to auto-correlate", default=1)
+    
+    # First, fetch recent observations so the user sees valid IDs
+    default_id = 1
+    with console.status("[bold blue]Fetching available DBMS observations..."):
+        r_obs = session.get(f"{API_BASE_URL}/api/dbms-events/observations?limit=5", headers=get_headers())
+    
+    if r_obs.status_code == 200:
+        obs_list = r_obs.json()
+        if obs_list:
+            table = Table(title="Recent Available DBMS Observations")
+            table.add_column("Observation ID", style="cyan", justify="right")
+            table.add_column("Type", style="magenta")
+            table.add_column("Query Preview", style="green")
+            table.add_column("Time (ms)", style="yellow", justify="right")
+            for o in obs_list:
+                q = o.get("query_text", "")
+                q_short = (q[:45] + "..") if len(q) > 45 else q
+                table.add_row(str(o["observation_id"]), o.get("query_type", "N/A"), q_short, str(o.get("execution_time_ms", 0)))
+            console.print(table)
+            default_id = obs_list[0]["observation_id"]
+        else:
+            console.print("[yellow]No DBMS observations found in the database. Please run option [6] from the main menu to collect some events first.[/yellow]")
+    
+    obs_id = IntPrompt.ask("Enter DBMS Observation ID to auto-correlate", default=default_id)
     window_ms = IntPrompt.ask("Time Window (ms)", default=5000)
 
     with console.status(f"[bold green]Auto-correlating DBMS Observation #{obs_id}..."):
@@ -357,35 +386,63 @@ def cross_layer_correlation_menu():
             Prompt.ask("\nPress Enter to return to Correlation menu")
 
 def run_identity_bridge_live_map():
-    console.print("\n[bold cyan]--- Live Identity Bridge Map ---[/bold cyan]")
-    console.print("Scanning OS network sockets and MySQL PROCESSLIST to prove process identities...")
+    console.print("\n[bold cyan]--- Live Identity Bridge Map (OS PIDs <-> MySQL Connections) ---[/bold cyan]")
+    console.print("[1] Instant Passive Scan (Detects any currently open connections)")
+    console.print("[2] Live Interactive Demo (Spawns a real client connection to demonstrate dynamic mapping)")
+
+    mode = Prompt.ask("Select Mode", choices=["1", "2"], default="2")
     
-    with console.status("[bold blue]Building real-time correlation map..."):
-        r = session.get(f"{API_BASE_URL}/api/bridge/live-map", headers=get_headers())
-        
-    if r.status_code == 200:
-        data = r.json()
-        active = data.get("active_bridges", 0)
-        mapping = data.get("mapping", [])
-        
-        console.print(f"\n[bold green]Found {active} Active Bridge(s)[/bold green]")
-        
-        if active == 0:
-            console.print("[yellow]No active OS-level connections to MySQL detected at this exact moment.[/yellow]")
-            console.print("Try running a script that connects to MySQL in another terminal and check again.")
+    demo_conn = None
+    if mode == "2":
+        try:
+            # Import settings to get MySQL credentials
+            import mysql.connector
+            from app.config.settings import settings
+            console.print("[dim]Opening real client connection to MySQL server...[/dim]")
+            demo_conn = mysql.connector.connect(
+                host=settings.mysql_host,
+                port=settings.mysql_port,
+                user=settings.mysql_user,
+                password=settings.mysql_password,
+                database=settings.mysql_database
+            )
+            time.sleep(0.5)
+        except Exception as err:
+            console.print(f"[dim yellow]Notice: Could not establish demo connection ({err}), scanning existing sockets instead.[/dim yellow]")
+
+    try:
+        with console.status("[bold blue]Scanning OS network sockets and MySQL PROCESSLIST..."):
+            r = session.get(f"{API_BASE_URL}/api/bridge/live-map", headers=get_headers())
+            
+        if r.status_code == 200:
+            data = r.json()
+            active = data.get("active_bridges", 0)
+            mapping = data.get("mapping", [])
+            
+            console.print(f"\n[bold green]Found {active} Active Bridge(s)[/bold green]")
+            
+            if active == 0:
+                console.print("[yellow]No active OS-level connections to MySQL detected at this exact moment.[/yellow]")
+                console.print("Try selecting Option [2] for an automated live test.")
+            else:
+                table = Table(title="OS PID <===> MySQL Connection Identity Bridge")
+                table.add_column("OS Process ID (PID)", style="cyan", justify="right")
+                table.add_column("Direction", style="dim", justify="center")
+                table.add_column("MySQL Connection ID", style="magenta", justify="left")
+                
+                for m in mapping:
+                    table.add_row(str(m["os_pid"]), "<======>", str(m["mysql_connection_id"]))
+                
+                console.print(table)
+                console.print("\n[bold green]✔ SUCCESS:[/bold green] The Cross-Layer Engine has successfully proved the identity bridge without relying on application-provided metrics!")
         else:
-            table = Table(title="OS PID <-> MySQL Connection Bridge")
-            table.add_column("OS Process ID (PID)", style="cyan", justify="right")
-            table.add_column("Direction", style="dim", justify="center")
-            table.add_column("MySQL Connection ID", style="magenta", justify="left")
-            
-            for m in mapping:
-                table.add_row(str(m["os_pid"]), "<======>", str(m["mysql_connection_id"]))
-            
-            console.print(table)
-            console.print("\n[bold]SUCCESS:[/bold] The Cross-Layer Engine has successfully proved the identity bridge without relying on application-provided metrics!")
-    else:
-        console.print(f"[bold red]Failed to load map: {r.text}[/bold red]")
+            console.print(f"[bold red]Failed to load map: {r.text}[/bold red]")
+    finally:
+        if demo_conn:
+            try:
+                demo_conn.close()
+            except:
+                pass
 
 # ---------------------------------------------------------------------------
 # OS Simulation Lab Functions

@@ -16,7 +16,11 @@ class Settings(BaseSettings):
     event_storage: str = "memory"
     dbms_collection_interval_seconds: int = 5
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "backend/.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()
