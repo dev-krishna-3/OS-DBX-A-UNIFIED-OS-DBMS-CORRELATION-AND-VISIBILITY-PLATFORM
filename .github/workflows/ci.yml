@@ -1,0 +1,46 @@
+name: OS-DBX Backend CI
+
+on:
+  push:
+    branches: [ "main", "develop", "clean-backend", "feature/**" ]
+  pull_request:
+    branches: [ "main", "develop", "clean-backend" ]
+
+jobs:
+  validate-and-test:
+    name: Lint, Compile & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+          if [ -f os_monitor/requirements.txt ]; then pip install -r os_monitor/requirements.txt; fi
+          pip install pytest flake8
+
+      - name: Validate Python syntax and bytecode compilation
+        run: |
+          python -m compileall backend os_monitor cli.py
+
+      - name: Lint codebase
+        run: |
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 backend os_monitor --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Exit-zero treats all errors as warnings
+          flake8 backend os_monitor --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Run Backend Tests (Isolated In-Memory Mode)
+        env:
+          EVENT_STORAGE: memory
+        run: |
+          pytest -v backend/tests
