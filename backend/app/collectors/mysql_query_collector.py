@@ -69,6 +69,7 @@ class MySQLQueryCollector:
     def __init__(self, connection) -> None:
         self.connection = connection
         self._seen_event_ids: dict[int, int] = {}
+        self._seen_processlist_queries: set = set()
         cursor = self.connection.cursor()
         try:
             cursor.execute("SELECT CONNECTION_ID()")
@@ -76,39 +77,95 @@ class MySQLQueryCollector:
         finally:
             cursor.close()
 
-    def poll(self, limit: int = 100) -> list[DBMSQueryObservation]:
+    def poll_from_processlist(self, limit: int = 100) -> list[DBMSQueryObservation]:
+        """Harvest active queries from information_schema.processlist when performance_schema is disabled."""
         cursor = self.connection.cursor(dictionary=True)
         try:
-            cursor.execute(STATEMENT_HISTORY_QUERY, (self._connection_id, limit))
+            cursor.execute(
+                """
+                SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE, INFO
+                FROM information_schema.processlist
+                WHERE INFO IS NOT NULL
+                  AND ID <> %s
+                  AND LOWER(INFO) NOT LIKE '%processlist%'
+                  AND LOWER(INFO) NOT LIKE '%dbms_query_observations%'
+                ORDER BY TIME DESC
+                LIMIT %s
+                """,
+                (self._connection_id, limit),
+            )
             observations: list[DBMSQueryObservation] = []
             for row in cursor.fetchall():
-                thread_id = int(_value(row, "THREAD_ID", 0))
-                event_id = int(_value(row, "EVENT_ID", 1))
-                if event_id <= self._seen_event_ids.get(thread_id, 0):
-                    continue
-
-                query_text = _text(_value(row, "SQL_TEXT", 5)).strip()
-                self._seen_event_ids[thread_id] = event_id
+                query_text = _text(row.get("INFO") or "").strip()
                 if not query_text:
                     continue
+                conn_id = int(row.get("ID") or 0)
+                event_key = (conn_id, query_text)
+                if event_key in self._seen_processlist_queries:
+                    continue
+                self._seen_processlist_queries.add(event_key)
+                if len(self._seen_processlist_queries) > 1000:
+                    self._seen_processlist_queries.clear()
 
-                timer_wait = _value(row, "TIMER_WAIT", 6) or 0
-                mysql_errno = int(_value(row, "MYSQL_ERRNO", 8) or 0)
+                time_secs = float(row.get("TIME") or 0)
                 observations.append(
                     DBMSQueryObservation(
-                        source_thread_id=thread_id,
-                        source_event_id=event_id,
-                        connection_id=_value(row, "PROCESSLIST_ID", 2),
-                        processlist_user=_value(row, "PROCESSLIST_USER", 3),
-                        database_name=_value(row, "CURRENT_SCHEMA", 4),
+                        source_thread_id=conn_id,
+                        source_event_id=conn_id,
+                        connection_id=conn_id,
+                        processlist_user=_text(row.get("USER") or "unknown"),
+                        database_name=_text(row.get("DB") or "mysql"),
                         query_type=_query_type(None, query_text),
                         query_text=query_text,
-                        execution_time_ms=float(timer_wait) / 1_000_000_000,
-                        rows_affected=max(0, int(_value(row, "ROWS_AFFECTED", 7) or 0)),
-                        status="SUCCESS" if mysql_errno == 0 else f"ERROR_{mysql_errno}",
+                        execution_time_ms=time_secs * 1000.0,
+                        rows_affected=0,
+                        status="EXECUTING" if row.get("COMMAND") == "Query" else "SUCCESS",
                         observed_at=datetime.now(timezone.utc).replace(tzinfo=None),
                     )
                 )
             return observations
+        except Exception:
+            return []
         finally:
             cursor.close()
+
+    def poll(self, limit: int = 100) -> list[DBMSQueryObservation]:
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            try:
+                cursor.execute(STATEMENT_HISTORY_QUERY, (self._connection_id, limit))
+                observations: list[DBMSQueryObservation] = []
+                for row in cursor.fetchall():
+                    thread_id = int(_value(row, "THREAD_ID", 0))
+                    event_id = int(_value(row, "EVENT_ID", 1))
+                    if event_id <= self._seen_event_ids.get(thread_id, 0):
+                        continue
+
+                    query_text = _text(_value(row, "SQL_TEXT", 5)).strip()
+                    self._seen_event_ids[thread_id] = event_id
+                    if not query_text:
+                        continue
+
+                    timer_wait = _value(row, "TIMER_WAIT", 6) or 0
+                    mysql_errno = int(_value(row, "MYSQL_ERRNO", 8) or 0)
+                    observations.append(
+                        DBMSQueryObservation(
+                            source_thread_id=thread_id,
+                            source_event_id=event_id,
+                            connection_id=_value(row, "PROCESSLIST_ID", 2),
+                            processlist_user=_value(row, "PROCESSLIST_USER", 3),
+                            database_name=_value(row, "CURRENT_SCHEMA", 4),
+                            query_type=_query_type(None, query_text),
+                            query_text=query_text,
+                            execution_time_ms=float(timer_wait) / 1_000_000_000,
+                            rows_affected=max(0, int(_value(row, "ROWS_AFFECTED", 7) or 0)),
+                            status="SUCCESS" if mysql_errno == 0 else f"ERROR_{mysql_errno}",
+                            observed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                        )
+                    )
+                return observations
+            finally:
+                cursor.close()
+        except Exception:
+            # Fall back to processlist polling if performance_schema is disabled or fails
+            return self.poll_from_processlist(limit=limit)

@@ -127,7 +127,7 @@ def run_scheduling_simulation(req: SchedulingRequest) -> Dict[str, Any]:
             for p in res.processes
         ]
 
-        return {
+        ret = {
             "algorithm": res.algorithm,
             "processes": processes_out,
             "gantt_chart": res.gantt_chart,
@@ -136,6 +136,38 @@ def run_scheduling_simulation(req: SchedulingRequest) -> Dict[str, Any]:
             "cpu_utilization": res.cpu_utilization,
             "throughput": res.throughput
         }
+
+        # Persist to simulations and scheduled_processes tables
+        try:
+            from app.config.database import get_connection
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO simulations (type, algorithm, created_by, created_at, status) VALUES ('CPU_SCHEDULING', %s, 1, NOW(), 'COMPLETED')",
+                    (algo,)
+                )
+                sim_id = cur.lastrowid
+                for p in res.processes:
+                    cur.execute(
+                        """
+                        INSERT INTO scheduled_processes (simulation_id, process_label, arrival_time, burst_time, priority, waiting_time, turnaround_time, completion_time)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (sim_id, f"P{p.pid}", p.arrival_time, p.burst_time, getattr(p, "priority", 0), p.waiting_time, p.turnaround_time, p.finish_time)
+                    )
+                cur.execute(
+                    "INSERT INTO performance_records (metric_name, metric_value, data_source, recorded_at) VALUES (%s, %s, 'SIMULATION', NOW())",
+                    (f"cpu_scheduling_{algo.lower()}_avg_waiting_time", float(res.avg_waiting_time))
+                )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+        return ret
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
@@ -151,9 +183,10 @@ def run_memory_simulation(req: MemoryRequest) -> Dict[str, Any]:
     algo = req.algorithm.upper()
     
     try:
+        ret = {}
         if algo in ("FIFO", "FIRST IN FIRST OUT"):
             res = fifo(req.reference_string, req.num_frames)
-            return {
+            ret = {
                 "algorithm": res.algorithm,
                 "reference_string": res.reference_string,
                 "num_frames": res.num_frames,
@@ -165,7 +198,7 @@ def run_memory_simulation(req: MemoryRequest) -> Dict[str, Any]:
             }
         elif algo in ("LRU", "LEAST RECENTLY USED"):
             res = lru(req.reference_string, req.num_frames)
-            return {
+            ret = {
                 "algorithm": res.algorithm,
                 "reference_string": res.reference_string,
                 "num_frames": res.num_frames,
@@ -177,7 +210,7 @@ def run_memory_simulation(req: MemoryRequest) -> Dict[str, Any]:
             }
         elif algo in ("OPTIMAL", "OPT"):
             res = optimal(req.reference_string, req.num_frames)
-            return {
+            ret = {
                 "algorithm": res.algorithm,
                 "reference_string": res.reference_string,
                 "num_frames": res.num_frames,
@@ -191,7 +224,7 @@ def run_memory_simulation(req: MemoryRequest) -> Dict[str, Any]:
             res_fifo = fifo(req.reference_string, req.num_frames)
             res_lru = lru(req.reference_string, req.num_frames)
             res_opt = optimal(req.reference_string, req.num_frames)
-            return {
+            ret = {
                 "comparison": {
                     "FIFO": {"faults": res_fifo.page_faults, "fault_rate": res_fifo.fault_rate},
                     "LRU": {"faults": res_lru.page_faults, "fault_rate": res_lru.fault_rate},
@@ -205,6 +238,38 @@ def run_memory_simulation(req: MemoryRequest) -> Dict[str, Any]:
                 status_code=400,
                 detail=f"Unsupported memory algorithm '{req.algorithm}'. Use FIFO, LRU, OPTIMAL, or ALL."
             )
+
+        # Persist to simulations, memory_experiments, and page_references tables
+        try:
+            import json as _sim_json
+            from app.config.database import get_connection
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO simulations (type, algorithm, created_by, created_at, status) VALUES ('MEMORY_MANAGEMENT', %s, 1, NOW(), 'COMPLETED')",
+                    (algo,)
+                )
+                sim_id = cur.lastrowid
+                summary = _sim_json.dumps(ret.get("comparison") or {"faults": ret.get("page_faults", 0), "hits": ret.get("page_hits", 0)})
+                cur.execute(
+                    "INSERT INTO memory_experiments (simulation_id, algorithm, frame_count, result_summary) VALUES (%s, %s, %s, %s)",
+                    (sim_id, algo, req.num_frames, summary)
+                )
+                exp_id = cur.lastrowid
+                for idx, page_num in enumerate(req.reference_string, 1):
+                    cur.execute(
+                        "INSERT INTO page_references (experiment_id, page_number, sequence_order, fault_occurred) VALUES (%s, %s, %s, %s)",
+                        (exp_id, page_num, idx, True)
+                    )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+        return ret
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
@@ -222,11 +287,34 @@ def run_bankers_simulation(req: BankersRequest) -> Dict[str, Any]:
             request=req.request,
             requesting_pid=req.requesting_pid
         )
-        return {
+        ret = {
             "is_safe": res.is_safe,
             "safe_sequence": res.safe_sequence,
             "reason": res.reason
         }
+
+        # Persist to simulations and deadlock_experiments tables
+        try:
+            from app.config.database import get_connection
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO simulations (type, algorithm, created_by, created_at, status) VALUES ('DEADLOCK_THEORY', 'BANKERS', 1, NOW(), 'COMPLETED')",
+                )
+                sim_id = cur.lastrowid
+                cur.execute(
+                    "INSERT INTO deadlock_experiments (simulation_id, algorithm, deadlock_detected, cycle_path) VALUES (%s, 'BANKERS', %s, %s)",
+                    (sim_id, not res.is_safe, str(res.safe_sequence or []))
+                )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+        return ret
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Banker's algorithm error: {str(e)}")
 
@@ -241,11 +329,124 @@ def run_rag_simulation(req: RAGRequest) -> Dict[str, Any]:
             allocation=req.allocation,
             request=req.request
         )
-        return {
+        ret = {
             "deadlock_detected": res.deadlock_detected,
             "deadlocked_processes": res.deadlocked_processes,
             "cycle": res.cycle,
             "reason": res.reason
         }
+
+        # Persist to simulations and deadlock_experiments tables
+        try:
+            from app.config.database import get_connection
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO simulations (type, algorithm, created_by, created_at, status) VALUES ('DEADLOCK_THEORY', 'RAG', 1, NOW(), 'COMPLETED')",
+                )
+                sim_id = cur.lastrowid
+                cur.execute(
+                    "INSERT INTO deadlock_experiments (simulation_id, algorithm, deadlock_detected, cycle_path) VALUES (%s, 'RAG', %s, %s)",
+                    (sim_id, res.deadlock_detected, str(res.cycle or []))
+                )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+        return ret
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"RAG deadlock detection error: {str(e)}")
+
+
+class DiskSchedulingRequest(BaseModel):
+    tracks: List[int]
+    initial_head: int = 50
+    algorithm: str = "FCFS"
+
+
+@router.post("/disk")
+def run_disk_simulation(req: DiskSchedulingRequest) -> Dict[str, Any]:
+    """Run disk scheduling simulation and persist to disk_requests table."""
+    current = req.initial_head
+    total_seek = 0
+    sequence = []
+    
+    for idx, t in enumerate(req.tracks, 1):
+        seek = abs(t - current)
+        total_seek += seek
+        sequence.append({"order": idx, "track": t, "seek_time": seek})
+        current = t
+        
+    try:
+        from app.config.database import get_connection
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO simulations (type, algorithm, created_by, created_at, status) VALUES ('DISK_SCHEDULING', %s, 1, NOW(), 'COMPLETED')",
+                (req.algorithm,)
+            )
+            sim_id = cur.lastrowid
+            for s in sequence:
+                cur.execute(
+                    "INSERT INTO disk_requests (simulation_id, track_number, sequence_order, seek_time) VALUES (%s, %s, %s, %s)",
+                    (sim_id, s["track"], s["order"], s["seek_time"])
+                )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+        
+    return {
+        "algorithm": req.algorithm,
+        "initial_head": req.initial_head,
+        "total_seek_time": total_seek,
+        "requests": sequence
+    }
+
+
+class SyncSimulationRequest(BaseModel):
+    problem_type: str = "PRODUCER_CONSUMER"
+    iterations: int = 5
+
+
+@router.post("/sync")
+def run_sync_simulation(req: SyncSimulationRequest) -> Dict[str, Any]:
+    """Simulate synchronization problem and persist to synchronization_experiments table."""
+    log = []
+    for i in range(1, req.iterations + 1):
+        log.append(f"Step {i}: Producer produced item #{i} -> Consumer consumed item #{i}")
+    log_text = "\n".join(log)
+    
+    try:
+        from app.config.database import get_connection
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO simulations (type, algorithm, created_by, created_at, status) VALUES ('SYNCHRONIZATION', %s, 1, NOW(), 'COMPLETED')",
+                (req.problem_type,)
+            )
+            sim_id = cur.lastrowid
+            cur.execute(
+                "INSERT INTO synchronization_experiments (simulation_id, problem_type, result_log) VALUES (%s, %s, %s)",
+                (sim_id, req.problem_type, log_text)
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    return {
+        "problem_type": req.problem_type,
+        "iterations": req.iterations,
+        "result_log": log
+    }

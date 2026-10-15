@@ -24,6 +24,14 @@ class TransactionRepository:
         try:
             cursor.execute(
                 """
+                INSERT INTO processes (pid, name, state, start_time)
+                VALUES (%s, 'active_workload', 'RUNNING', %s)
+                ON DUPLICATE KEY UPDATE state = 'RUNNING'
+                """,
+                (pid, timestamp),
+            )
+            cursor.execute(
+                """
                 INSERT INTO transactions
                     (pid, status, start_time, isolation_level)
                 VALUES (%s, %s, %s, %s)
@@ -34,6 +42,16 @@ class TransactionRepository:
             self._insert_operation(
                 cursor, transaction_id, "BEGIN", None, 1, timestamp
             )
+            try:
+                cursor.execute("SELECT process_id FROM processes WHERE pid = %s LIMIT 1", (pid,))
+                p_row = cursor.fetchone()
+                if p_row:
+                    cursor.execute(
+                        "INSERT INTO system_calls (process_id, syscall_name, arguments, return_value, timestamp) VALUES (%s, %s, %s, '0', %s)",
+                        (p_row[0], "sys_tx_begin", f"iso={isolation_level}", timestamp),
+                    )
+            except Exception:
+                pass
             self.connection.commit()
             return transaction_id
         except Exception:

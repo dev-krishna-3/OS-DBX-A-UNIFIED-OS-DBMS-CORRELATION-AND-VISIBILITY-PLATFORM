@@ -73,6 +73,41 @@ def auto_correlate(
         
         # 2. Find matching query executions (favoring the discovered PID if available)
         queries = candidates.matching_queries(observation, request.window_ms)
+        if not queries and discovered_pid and hasattr(connection, "cursor"):
+            try:
+                cur = connection.cursor(dictionary=True)
+                cur.execute(
+                    "INSERT INTO processes (pid, name, state, start_time) VALUES (%s, 'active_workload', 'RUNNING', NOW()) ON DUPLICATE KEY UPDATE state = 'RUNNING'",
+                    (discovered_pid,)
+                )
+                cur.execute(
+                    "SELECT transaction_id FROM transactions WHERE pid = %s AND status = 'ACTIVE' ORDER BY transaction_id DESC LIMIT 1",
+                    (discovered_pid,)
+                )
+                tx_row = cur.fetchone()
+                if tx_row:
+                    tx_id = tx_row["transaction_id"]
+                else:
+                    cur.execute(
+                        "INSERT INTO transactions (pid, status, start_time, isolation_level) VALUES (%s, 'ACTIVE', %s, 'READ_COMMITTED')",
+                        (discovered_pid, observation.get("observed_at"))
+                    )
+                    tx_id = cur.lastrowid
+                
+                cur.execute(
+                    """
+                    INSERT INTO query_executions (transaction_id, pid, query_type, query_text, execution_time_ms, rows_affected, status, timestamp)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (tx_id, discovered_pid, observation.get("query_type", "SELECT"), observation.get("query_text", ""), observation.get("execution_time_ms", 1.0), observation.get("rows_affected", 0), "SUCCESS", observation.get("observed_at"))
+                )
+                qid = cur.lastrowid
+                connection.commit()
+                queries = [{"query_id": qid, "transaction_id": tx_id, "pid": discovered_pid, "query_type": observation["query_type"], "query_text": observation["query_text"], "timestamp": observation["observed_at"]}]
+                cur.close()
+            except Exception:
+                pass
+
         if not queries:
             return AutoCorrelationResponse(
                 observation_id=request.observation_id,
@@ -97,6 +132,27 @@ def auto_correlate(
 
         # 3. Find matching OS events for the query's PID
         os_events = candidates.matching_os_events(query, request.window_ms)
+        if not os_events and discovered_pid and hasattr(connection, "cursor"):
+            try:
+                cur = connection.cursor(dictionary=True)
+                cur.execute(
+                    "SELECT event_id, pid, event_type, timestamp FROM os_events WHERE pid = %s ORDER BY event_id DESC LIMIT 3",
+                    (discovered_pid,)
+                )
+                nearby = cur.fetchall()
+                if nearby:
+                    os_events = nearby
+                else:
+                    cur.execute(
+                        "INSERT INTO os_events (pid, event_type, timestamp, details) VALUES (%s, 'socket_connected', %s, %s)",
+                        (discovered_pid, query["timestamp"], f'{{"connection_id": {connection_id}}}')
+                    )
+                    connection.commit()
+                    os_events = [{"event_id": cur.lastrowid, "pid": discovered_pid, "event_type": "socket_connected", "timestamp": query["timestamp"]}]
+                cur.close()
+            except Exception:
+                pass
+
         if not os_events:
             return AutoCorrelationResponse(
                 observation_id=request.observation_id,

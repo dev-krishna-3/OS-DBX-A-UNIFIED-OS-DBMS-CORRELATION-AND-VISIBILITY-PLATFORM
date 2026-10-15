@@ -49,7 +49,10 @@ async def get_audit_logs(
 ):
     """Retrieve audit logs. Only admins can access this."""
     if not is_user_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Admin privileges required. Current user is not an administrator. Please authenticate as an admin account (username: admin, UID: 0)."
+        )
     
     connection = get_connection()
     try:

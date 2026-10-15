@@ -16,6 +16,10 @@ def get_live_identity_map():
         database="information_schema"
     )
     mapping = bridge.build_pid_to_connection_map()
+    is_admin = bridge.is_admin_mode()
+    warning = None
+    if bridge.has_access_denied and not is_admin:
+        warning = "[!] Administrator privileges recommended for complete cross-user PID/socket mapping."
     
     # Format the result nicely
     result = []
@@ -25,4 +29,10 @@ def get_live_identity_map():
             "mysql_connection_id": conn_id
         })
         
-    return {"status": "success", "active_bridges": len(result), "mapping": result}
+    return {
+        "status": "success",
+        "active_bridges": len(result),
+        "mapping": result,
+        "is_admin": is_admin,
+        "warning": warning
+    }
