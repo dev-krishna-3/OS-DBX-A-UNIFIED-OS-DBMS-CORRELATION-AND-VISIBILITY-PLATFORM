@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f7f5ed" />
+  <title>OS-DBX Lab — Learn by running it</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+  <!-- Icon sprite: every icon in the page is drawn from here -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/></symbol>
+      <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></symbol>
+      <symbol id="i-lab" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6.2L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.2V3"/><path d="M7.5 14h9"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.5C10.5 5 8 4.5 4 4.5v14c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2v-14c-4 0-6.5.5-8 2z"/><path d="M12 6.5v14"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+      <symbol id="i-memory" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="10" rx="2"/><path d="M7 10v2M11 10v2M15 10v2M6 16v3M10 16v3M14 16v3M18 16v3"/></symbol>
+      <symbol id="i-states" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.3 11l7.4-3.8M8.3 13l7.4 3.8"/></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
+      <symbol id="i-step" viewBox="0 0 24 24"><path d="M6 5l9 7-9 7z"/><path d="M19 5v14"/></symbol>
+      <symbol id="i-replay" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v4h4"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13M10 11v6M14 11v6"/></symbol>
+      <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="10" y="10" width="4" height="4"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-4 3.8-6 7-6s6.2 2 7 6"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    </defs>
+  </svg>
+
+  <a class="skip-link" href="#home">Skip to the lab</a>
+
+  <div class="app-shell">
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar">
+      <a class="brand" href="#home" aria-label="OS-DBX home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>os<span class="brand-dot">.</span>dbx</span>
+      </a>
+
+      <nav class="nav" aria-label="Main navigation">
+        <a class="nav-item" id="nav-home" href="#home">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-grid"/></svg><span>Home</span>
+        </a>
+
+        <p class="nav-heading">Operating system</p>
+        <a class="nav-item" id="nav-lab" href="#lab"><b class="nav-num">01</b><span>Process lab</span></a>
+
+        <p class="nav-heading">Database</p>
+        <button class="nav-item is-soon" type="button" data-soon="Query watcher: see how long each database question takes."><b class="nav-num">02</b><span>Query watcher</span></button>
+        <button class="nav-item is-soon" type="button" data-soon="Transactions: try BEGIN, READ, WRITE and COMMIT, and see how locks hold things up."><b class="nav-num">03</b><span>Transactions</span></button>
+
+        <p class="nav-heading">Both together</p>
+        <button class="nav-item is-soon" type="button" data-soon="Connect the dots: link a program on your computer to the database request it made."><b class="nav-num">04</b><span>Connect the dots</span></button>
+        <button class="nav-item is-soon" type="button" data-soon="Deadlock graph: spot the circle of waiting that gets everyone stuck."><b class="nav-num">05</b><span>Deadlock graph</span></button>
+        <button class="nav-item is-soon" type="button" data-soon="Incident replay: rewind a problem and see what led to it."><b class="nav-num">06</b><span>Incident replay</span></button>
+
+        <p class="nav-heading">Going deeper</p>
+        <button class="nav-item is-soon" type="button" data-soon="Conflict checker: can these transactions safely run together?"><b class="nav-num">07</b><span>Conflict checker</span></button>
+        <button class="nav-item is-soon" type="button" data-soon="Recovery sandbox: crash it, then watch REDO and UNDO fix it."><b class="nav-num">08</b><span>Recovery sandbox</span></button>
+        <button class="nav-item is-soon" type="button" data-soon="Impact and speed: which slow query hurts the most?"><b class="nav-num">09</b><span>Impact &amp; speed</span></button>
+      </nav>
+
+      <section class="challenge" id="challenge" hidden aria-labelledby="challenge-title">
+        <h2 id="challenge-title">Your challenge</h2>
+        <p id="challenge-note">Run all four rules on the same processes. Which one makes people wait the least?</p>
+        <ul class="challenge-list" id="challenge-list">
+          <li data-rule="FCFS"><span class="tick"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span>FCFS</li>
+          <li data-rule="SJF"><span class="tick"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span>SJF</li>
+          <li data-rule="PRIORITY"><span class="tick"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span>Priority</li>
+          <li data-rule="RR"><span class="tick"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span>Round robin</li>
+        </ul>
+        <p class="challenge-count" id="challenge-count">0 of 4 tried</p>
+      </section>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <main class="main-content" id="home">
+      <div class="inner">
+
+        <header class="topbar">
+          <div class="breadcrumb">Learning space <span aria-hidden="true">/</span> <strong id="crumb">Home</strong></div>
+          <div class="top-actions">
+            <span class="safe-badge" id="safe-badge"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-shield"/></svg>Safe sandbox</span>
+            <button class="help-button" id="help-button" type="button">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-help"/></svg>How does this work?
+            </button>
+          </div>
+        </header>
+
+        <!-- ============ HOME VIEW ============ -->
+        <div id="view-home">
+          <section class="home-hero" aria-labelledby="home-title">
+            <h1 id="home-title">Your OS and database playground</h1>
+            <p class="intro">Nine small labs that show what a computer does behind the scenes. Start with the first one. The rest unlock as they are built.</p>
+          </section>
+
+          <section class="health" aria-label="System status">
+            <div class="card status-card">
+              <span class="status-dot" id="api-dot" data-state="checking"></span>
+              <div><h3>Backend</h3><p id="api-text">Checking…</p></div>
+              <code>/health</code>
+            </div>
+            <div class="card status-card stream">
+              <div><h3>Event stream</h3><p id="stream-text">Starts when the backend is on.</p></div>
+              <dl class="stream-nums">
+                <div><dt>Seen</dt><dd id="n-received">–</dd></div>
+                <div><dt>Handled</dt><dd id="n-processed">–</dd></div>
+                <div><dt>Missed</dt><dd id="n-dropped">–</dd></div>
+              </dl>
+            </div>
+            <button class="card cta-card" id="cta-lab" type="button">
+              <span class="cta-icon"><svg class="icon fill" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-play"/></svg></span>
+              <span><strong>Start the process lab</strong><small>Works right now, no backend needed</small></span>
+            </button>
+          </section>
+
+          <section class="views" aria-labelledby="views-title">
+            <div class="section-heading">
+              <div><h2 id="views-title">Nine labs to explore</h2><p class="section-sub">Each one turns a big idea into something you can click and watch.</p></div>
+            </div>
+            <div class="view-grid">
+              <a class="view-card ready" href="#lab" style="--c:#d9ee78">
+                <span class="view-top"><b>01</b><i>Operating system</i></span>
+                <h3>Process lab</h3>
+                <p>Watch the CPU choose which program runs next.</p>
+                <small>FCFS · SJF · Priority · Round robin</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-cpu"/></svg></span>
+                <span class="open-tag">Open</span>
+              </a>
+              <button class="view-card" type="button" data-soon="Query watcher: see how long each database question takes." style="--c:#d9ee78">
+                <span class="view-top"><b>02</b><i>Database</i></span>
+                <h3>Query watcher</h3>
+                <p>See how long each database question takes.</p>
+                <small>type · time · rows touched</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-db"/></svg></span>
+                <span class="open-tag">Soon</span>
+              </button>
+              <button class="view-card" type="button" data-soon="Transactions: try BEGIN, READ, WRITE and COMMIT, and see how locks hold things up." style="--c:#d9ee78">
+                <span class="view-top"><b>03</b><i>Database</i></span>
+                <h3>Transactions</h3>
+                <p>Try a change, then keep it or take it back.</p>
+                <small>BEGIN · READ · WRITE · COMMIT or ROLLBACK</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-lock"/></svg></span>
+                <span class="open-tag">Soon</span>
+              </button>
+
+              <button class="view-card" type="button" data-soon="Connect the dots: link a program on your computer to the database request it made." style="--c:#ffb19d">
+                <span class="view-top"><b>04</b><i>Both together</i></span>
+                <h3>Connect the dots</h3>
+                <p>Link a running program to the database request it made.</p>
+                <small>program → transaction → query → lock</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-states"/></svg></span>
+                <span class="open-tag">Soon</span>
+              </button>
+              <button class="view-card" type="button" data-soon="Deadlock graph: spot the circle of waiting that gets everyone stuck." style="--c:#ffb19d">
+                <span class="view-top"><b>05</b><i>Both together</i></span>
+                <h3>Deadlock graph</h3>
+                <p>Who is waiting for whom? Spot the circle that gets everyone stuck.</p>
+                <small>T1 waits on T2 · T2 waits on T1</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-states"/></svg></span>
+                <span class="open-tag">Soon</span>
+              </button>
+              <button class="view-card" type="button" data-soon="Incident replay: rewind a problem and see what led to it." style="--c:#ffb19d">
+                <span class="view-top"><b>06</b><i>Both together</i></span>
+                <h3>Incident replay</h3>
+                <p>Rewind a problem and see the events that led to it.</p>
+                <small>event → transaction → query → incident</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-replay"/></svg></span>
+                <span class="open-tag">Soon</span>
+              </button>
+
+              <button class="view-card" type="button" data-soon="Conflict checker: can these transactions safely run together?" style="--c:#f0cf74">
+                <span class="view-top"><b>07</b><i>Going deeper</i></span>
+                <h3>Conflict checker</h3>
+                <p>Can these transactions safely run at the same time?</p>
+                <small>conflicts → order graph → verdict</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-list"/></svg></span>
+                <span class="open-tag">Soon</span>
+              </button>
+              <button class="view-card" type="button" data-soon="Recovery sandbox: crash it, then watch REDO and UNDO fix it." style="--c:#f0cf74">
+                <span class="view-top"><b>08</b><i>Going deeper</i></span>
+                <h3>Recovery sandbox</h3>
+                <p>Crash it on purpose, then watch it put itself back together.</p>
+                <small>checkpoint → scan log → REDO or UNDO</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-book"/></svg></span>
+                <span class="open-tag">Soon</span>
+              </button>
+              <button class="view-card" type="button" data-soon="Impact and speed: which slow query hurts the most?" style="--c:#f0cf74">
+                <span class="view-top"><b>09</b><i>Going deeper</i></span>
+                <h3>Impact &amp; speed</h3>
+                <p>Which slow query hurts the most, and who feels it?</p>
+                <small>how long · who is affected · chain reactions</small>
+                <span class="view-tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-memory"/></svg></span>
+                <span class="open-tag">Soon</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="hood" aria-labelledby="hood-title">
+            <div class="section-heading">
+              <div><h2 id="hood-title">How it all connects</h2><p class="section-sub">The process lab runs in your browser, so it works even when the backend is off.</p></div>
+            </div>
+            <div class="flow">
+              <div class="flow-node"><span class="tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-grid"/></svg></span><div><h3>This page</h3><p>Where you click and watch</p></div></div>
+              <span class="flow-line" aria-hidden="true"><i></i><i></i><i></i></span>
+              <div class="flow-node"><span class="tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-cpu"/></svg></span><div><h3>FastAPI gateway</h3><p>127.0.0.1:8000/api</p></div></div>
+              <span class="flow-line" aria-hidden="true"><i></i><i></i><i></i></span>
+              <div class="flow-node"><span class="tile"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-db"/></svg></span><div><h3>MySQL</h3><p>os_dbx · 31 tables</p></div></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ============ LAB VIEW ============ -->
+        <div id="view-lab" hidden>
+        <!-- ---------- Hero ---------- -->
+        <section class="welcome" id="lab" aria-labelledby="hero-title">
+          <div class="welcome-copy">
+            <h1 id="hero-title">Make a process.<br /><em>See what happens.</em></h1>
+            <p class="intro">Your computer has one CPU, a bit like a shop with one cashier. Lots of programs are waiting for a turn. Pick a rule, add a few programs, and watch who gets served first.</p>
+            <ol class="step-trail" aria-label="How this lab works">
+              <li><a href="#setup"><span class="num">1</span>Set up</a></li>
+              <li><a href="#run"><span class="num">2</span>Run it</a></li>
+              <li><a href="#results"><span class="num">3</span>See why</a></li>
+            </ol>
+            <a class="inline-link" href="#words">Not sure what a word means? See Words to know</a>
+          </div>
+
+          <div class="scene" aria-hidden="true">
+            <div class="scene-sticker">One CPU, many programs</div>
+            <span class="q-chip" style="--c:#d9ee78">P1</span>
+            <span class="q-chip" style="--c:#ffb19d">P2</span>
+            <span class="q-chip" style="--c:#f0cf74">P3</span>
+            <span class="q-chip" style="--c:#c2dfcd">P4</span>
+            <div class="scene-cpu">
+              <svg class="icon" viewBox="0 0 24 24"><use href="#i-cpu"/></svg>
+              <strong>CPU</strong>
+              <small>one at a time</small>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- Setup ---------- -->
+        <section class="lab-section" id="setup" aria-labelledby="setup-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="setup-title">Build your little system</h2>
+              <p class="section-sub">Choose a rule, then list the programs that want the CPU.</p>
+            </div>
+            <button class="text-button" id="sample-button" type="button">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-replay"/></svg>Reset to the example
+            </button>
+          </div>
+
+          <div class="lab-grid">
+            <!-- Step 1 -->
+            <section class="card setup-card" aria-labelledby="rule-title">
+              <div class="card-heading">
+                <span class="step-pill">1</span>
+                <div><h3 id="rule-title">Pick a rule</h3><p>How should the CPU choose who goes next?</p></div>
+              </div>
+
+              <fieldset class="rule-list">
+                <legend class="sr-only">Scheduling rule</legend>
+
+                <label class="rule">
+                  <input type="radio" name="rule" value="FCFS" checked />
+                  <span class="rule-card">
+                    <span class="rule-icon">
+                      <svg class="ico-fcfs" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="10" width="6" height="13" rx="2"/><rect x="13" y="10" width="6" height="13" rx="2"/><rect x="23" y="10" width="6" height="13" rx="2"/></svg>
+                    </span>
+                    <span>
+                      <span class="rule-title">First come, first served <span class="rule-abbr">FCFS</span></span>
+                      <span class="rule-desc">Like a shop queue. Whoever arrives first goes first.</span>
+                    </span>
+                  </span>
+                </label>
+
+                <label class="rule">
+                  <input type="radio" name="rule" value="SJF" />
+                  <span class="rule-card">
+                    <span class="rule-icon">
+                      <svg class="ico-sjf" viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="5" width="24" height="6" rx="3"/><rect x="4" y="13" width="10" height="6" rx="3"/><rect x="4" y="21" width="17" height="6" rx="3"/></svg>
+                    </span>
+                    <span>
+                      <span class="rule-title">Shortest job first <span class="rule-abbr">SJF</span></span>
+                      <span class="rule-desc">Quick jobs skip ahead. The shortest one goes next.</span>
+                    </span>
+                  </span>
+                </label>
+
+                <label class="rule">
+                  <input type="radio" name="rule" value="PRIORITY" />
+                  <span class="rule-card">
+                    <span class="rule-icon">
+                      <svg class="ico-pri" viewBox="0 0 32 32" aria-hidden="true"><polygon points="16,4 19.5,12 28,13 21.5,19 23.5,27.5 16,23 8.5,27.5 10.5,19 4,13 12.5,12"/></svg>
+                    </span>
+                    <span>
+                      <span class="rule-title">Priority</span>
+                      <span class="rule-desc">Important jobs go first. A smaller number means more important.</span>
+                    </span>
+                  </span>
+                </label>
+
+                <label class="rule">
+                  <input type="radio" name="rule" value="RR" />
+                  <span class="rule-card">
+                    <span class="rule-icon">
+                      <svg class="ico-rr" viewBox="0 0 32 32" aria-hidden="true"><g class="spin"><path d="M26 16a10 10 0 1 1-3-7.1"/><path d="M26 5v6h-6"/></g><circle cx="16" cy="16" r="2.6"/></svg>
+                    </span>
+                    <span>
+                      <span class="rule-title">Round robin <span class="rule-abbr">RR</span></span>
+                      <span class="rule-desc">Everyone gets a short turn, then waits for the next one.</span>
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+
+              <div class="quantum" id="quantum-field" data-open="false">
+                <div class="quantum-inner">
+                  <div class="quantum-box">
+                    <label class="quantum-label" for="quantum">How long is one turn?</label>
+                    <div id="quantum-mount"></div>
+                    <p class="helper">This is the <strong>time quantum</strong>: the most time a process gets before the next one steps up.</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Step 2 -->
+            <section class="card process-card" id="process-card" data-rule="FCFS" aria-labelledby="process-title">
+              <div class="card-heading process-heading">
+                <span class="step-pill coral">2</span>
+                <div><h3 id="process-title">Add your processes</h3><p>A process is a program waiting for the CPU. Change the numbers to make it yours.</p></div>
+                <span class="process-count" id="process-count">3 processes</span>
+              </div>
+
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Process</th>
+                      <th scope="col">Arrives <span class="th-abbr">AT</span><span class="th-hint">when it joins the line</span></th>
+                      <th scope="col">Needs <span class="th-abbr">BT</span><span class="th-hint">CPU time to finish</span></th>
+                      <th scope="col" class="col-priority">Priority<span class="th-hint" id="priority-hint">not used by this rule</span></th>
+                      <th scope="col"><span class="sr-only">Remove</span></th>
+                    </tr>
+                  </thead>
+                  <tbody id="process-rows"></tbody>
+                </table>
+              </div>
+
+              <div class="table-footer">
+                <span id="table-note">Tip: use + and − to change a number.</span>
+                <button class="add-button" id="add-process" type="button">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus"/></svg>Add process
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="run-bar" id="run">
+            <div class="run-copy">
+              <span class="step-pill olive">3</span>
+              <div><h3>Ready?</h3><p>The CPU will pick who goes first, then next, then next.</p></div>
+            </div>
+            <button class="run-button" id="run-button" type="button">
+              <svg class="icon fill" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-play"/></svg>Run simulation
+            </button>
+          </div>
+        </section>
+
+        <!-- ---------- Results ---------- -->
+        <section class="results-section" id="results" aria-labelledby="results-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="results-title">Watch the CPU decide</h2>
+              <p class="section-sub" id="run-status">Press “Run simulation” above to see the CPU at work.</p>
+            </div>
+            <div class="controls" role="group" aria-label="Playback controls">
+              <button class="ctl primary" id="play-button" type="button" disabled>
+                <svg class="icon fill" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-play"/></svg><span>Play</span>
+              </button>
+              <button class="ctl" id="step-button" type="button" disabled>
+                <svg class="icon fill" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-step"/></svg><span>One step</span>
+              </button>
+              <button class="ctl" id="replay-button" type="button" disabled>
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-replay"/></svg><span>Start over</span>
+              </button>
+              <div class="speed" role="group" aria-label="Speed">
+                <button type="button" data-speed="1900" aria-pressed="false">Slow</button>
+                <button type="button" data-speed="1200" aria-pressed="true">Normal</button>
+                <button type="button" data-speed="550" aria-pressed="false">Fast</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="results-grid">
+            <div class="card stage-card">
+              <div class="empty" id="timeline-empty">
+                <span class="empty-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-cpu"/></svg></span>
+                <strong>Nothing is running yet</strong>
+                <span>Set up your processes, then press <b>Run simulation</b>.</span>
+              </div>
+
+              <div id="stage" hidden>
+                <div class="stage-zones">
+                  <section class="zone zone-later" aria-label="Not here yet">
+                    <h4>Not here yet</h4>
+                    <div class="chips" id="chips-later"></div>
+                  </section>
+                  <section class="zone zone-waiting" aria-label="Waiting line">
+                    <h4>Waiting line</h4>
+                    <div class="chips" id="chips-waiting"></div>
+                  </section>
+                  <section class="zone zone-cpu" id="zone-cpu" aria-label="CPU">
+                    <h4>On the CPU</h4>
+                    <div class="cpu-body" id="cpu-body"></div>
+                  </section>
+                  <section class="zone zone-done" aria-label="Finished">
+                    <h4>Finished</h4>
+                    <div class="chips" id="chips-done"></div>
+                  </section>
+                </div>
+
+                <div class="narration" id="narration" aria-live="polite">
+                  <span class="step-count" id="step-count">Step 1 of 1</span>
+                  <div><h4 id="narration-title"></h4><p id="narration-text"></p></div>
+                </div>
+
+                <div class="timeline">
+                  <div class="timeline-head">
+                    <div><h3>CPU timeline</h3><p>Each block shows who used the CPU, and when.</p></div>
+                  </div>
+                  <div class="gantt-scroll" id="gantt-scroll"></div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="card takeaway" aria-labelledby="insight-title">
+              <h3 id="insight-title">Ready to find out?</h3>
+              <p class="lead" id="insight-copy">Run the same processes with different rules. Notice how the order changes, and who has to wait.</p>
+
+              <div id="result-detail" hidden>
+                <div class="metrics" id="metrics"></div>
+
+                <div class="breakdown">
+                  <h4>Who waited?</h4>
+                  <p class="sub">Each bar is one process from arriving to finishing.</p>
+                  <div class="legend"><span><i class="lg-wait"></i>waiting in line</span><span><i class="lg-run"></i>using the CPU</span></div>
+                  <div id="bars"></div>
+                </div>
+
+                <div class="compare">
+                  <h4>How the other rules did</h4>
+                  <p class="sub">Average wait on these same processes. Tap one to try it.</p>
+                  <div id="compare"></div>
+                </div>
+              </div>
+
+              <div class="quick-note">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-help"/></svg>
+                <p><strong>Quick note.</strong> <span id="concept-copy">Waiting time is how long a process sits in line. Turnaround time is waiting plus running.</span></p>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ---------- Words to know ---------- -->
+        <section class="words" id="words" aria-labelledby="words-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="words-title">Words to know</h2>
+              <p class="section-sub">Each one in plain language, with the shop idea alongside.</p>
+            </div>
+          </div>
+          <dl class="word-grid">
+            <div class="word" style="--c:#d9ee78"><dt>CPU</dt><dd>The brain of the computer. It can only work on one job at a time.</dd><dd class="shop">In the shop: the cashier.</dd></div>
+            <div class="word" style="--c:#ffb19d"><dt>Process</dt><dd>A program that is running, or waiting to run.</dd><dd class="shop">In the shop: a customer.</dd></div>
+            <div class="word" style="--c:#f0cf74"><dt>Arrival time <span class="abbr">AT</span></dt><dd>The moment a process joins the waiting line.</dd><dd class="shop">In the shop: when the customer walks in.</dd></div>
+            <div class="word" style="--c:#c2dfcd"><dt>Burst time <span class="abbr">BT</span></dt><dd>How much CPU time a process needs to finish its job.</dd><dd class="shop">In the shop: how long they need at the till.</dd></div>
+            <div class="word" style="--c:#f2b9c8"><dt>Waiting time</dt><dd>How long a process sits in line without being served.</dd><dd class="shop">In the shop: time spent queueing.</dd></div>
+            <div class="word" style="--c:#d8dcb1"><dt>Turnaround time</dt><dd>From joining the line to being completely done. It equals waiting plus running.</dd><dd class="shop">In the shop: walking in to walking out.</dd></div>
+            <div class="word" style="--c:#d9ee78"><dt>Priority</dt><dd>How important a job is. In this lab, 1 is the most important.</dd><dd class="shop">In the shop: a customer with a fast pass.</dd></div>
+            <div class="word" style="--c:#ffb19d"><dt>Time quantum</dt><dd>The longest turn a process can have in Round robin.</dd><dd class="shop">In the shop: a timer on each customer.</dd></div>
+          </dl>
+        </section>
+
+        </div>
+
+        <footer class="site-footer">
+          <span>OS-DBX Lab</span>
+          <span>Made for curious minds. Learn at your own pace.</span>
+        </footer>
+      </div>
+    </main>
+  </div>
+
+  <!-- ============ HELP DIALOG ============ -->
+  <dialog class="help" id="help-dialog" aria-labelledby="help-title">
+    <div class="help-body">
+      <button class="help-close" id="help-close" type="button" aria-label="Close help">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x"/></svg>
+      </button>
+      <h2 id="help-title">Think of a shop with one cashier</h2>
+      <ul class="help-list">
+        <li><span class="help-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-cpu"/></svg></span><div><strong>The CPU is the cashier.</strong><p>It can only serve one customer at a time.</p></div></li>
+        <li><span class="help-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-user"/></svg></span><div><strong>Each process is a customer.</strong><p>A program waiting for its turn.</p></div></li>
+        <li><span class="help-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-list"/></svg></span><div><strong>A rule decides who is next.</strong><p>First come first served, shortest first, most important first, or taking turns.</p></div></li>
+        <li><span class="help-ico"><svg class="icon fill" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-play"/></svg></span><div><strong>Your job: try, watch, compare.</strong><p>Change the rule, run it, and see who waits the longest.</p></div></li>
+      </ul>
+      <button class="run-button small" id="help-done" type="button">Got it</button>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="./app.js" defer></script>
+</body>
+</html>
