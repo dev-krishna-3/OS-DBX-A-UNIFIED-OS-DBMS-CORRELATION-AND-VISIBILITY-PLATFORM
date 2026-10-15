@@ -116,3 +116,92 @@ def get_stream_metrics(request: Request) -> dict:
         metrics["adapter_health"] = adapter.get_health()
 
     return metrics
+
+
+@router.get("/filesystem")
+def list_filesystem_events(limit: int = 50) -> list[dict]:
+    """Return recent filesystem events from in-memory stream and database."""
+    events = []
+    with _store_lock:
+        for e in _filesystem_events:
+            d = e.model_dump()
+            if hasattr(d.get("timestamp"), "isoformat"):
+                d["timestamp"] = d["timestamp"].isoformat()
+            if hasattr(d.get("received_at"), "isoformat"):
+                d["received_at"] = d["received_at"].isoformat()
+            events.append(d)
+
+    try:
+        from app.config.database import get_connection
+        conn = get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                """
+                SELECT event_id AS id, event_type, file_path, timestamp, details
+                FROM os_events
+                WHERE file_path IS NOT NULL OR event_type LIKE 'file_%'
+                ORDER BY event_id DESC LIMIT %s
+                """,
+                (limit,)
+            )
+            for row in cur.fetchall():
+                ts = row["timestamp"].isoformat() if hasattr(row["timestamp"], "isoformat") else str(row["timestamp"])
+                events.append({
+                    "id": row["id"],
+                    "event_type": row["event_type"],
+                    "file_path": row.get("file_path"),
+                    "timestamp": ts,
+                    "received_at": ts,
+                    "pid": None,
+                    "source": "OS"
+                })
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    # Deduplicate and sort newest first
+    seen = set()
+    unique_events = []
+    for ev in events:
+        key = (ev.get("event_type"), ev.get("file_path"), str(ev.get("timestamp") or ""))
+        if key not in seen:
+            seen.add(key)
+            unique_events.append(ev)
+    unique_events.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
+    return unique_events[:limit]
+
+
+@router.get("/processes")
+def list_processes(limit: int = 50) -> list[dict]:
+    """Return real-time running process snapshot using Person 1's collector."""
+    try:
+        from os_monitor.collector import snapshot_processes
+        snapshot = snapshot_processes()
+        result = []
+        for pid, info in snapshot.items():
+            result.append({
+                "pid": pid,
+                "ppid": info.get("ppid"),
+                "name": info.get("name"),
+                "user": info.get("user"),
+                "file_path": info.get("file_path"),
+                "state": info.get("state")
+            })
+        return sorted(result, key=lambda x: x["pid"])[:limit]
+    except Exception as e:
+        return []
+
+
+@router.get("/resources")
+def list_resource_metrics(limit: int = 50) -> list[dict]:
+    """Return real-time per-process resource metrics using Person 1's collector."""
+    try:
+        from os_monitor.resource_monitor import collect_metrics
+        metrics = collect_metrics()
+        return metrics[:limit]
+    except Exception as e:
+        return []
+
