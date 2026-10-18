@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { @apply bg-sky-100 font-sans text-ink antialiased; }
+:focus-visible { @apply outline-none ring-2 ring-ink ring-offset-2 ring-offset-sky-100 rounded-md; }
+.link-u { @apply relative; }
+.link-u::after { content: ''; @apply absolute left-0 -bottom-1 h-0.5 w-full origin-left scale-x-0 bg-ink transition-transform duration-300; }
+.link-u:hover::after { @apply scale-x-100; }
+.no-scrollbar { scrollbar-width: none; } .no-scrollbar::-webkit-scrollbar { display: none; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition-duration: .01ms !important; } }
