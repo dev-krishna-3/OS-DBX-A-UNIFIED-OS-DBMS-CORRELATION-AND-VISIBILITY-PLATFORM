@@ -1,17 +1,32 @@
 import { useState, type FormEvent } from 'react';
-import { Check, LockKeyhole } from 'lucide-react';
+import {
+  ArrowRight,
+  Cpu,
+  Database,
+  Eye,
+  EyeOff,
+  LockKeyhole,
+  Mail,
+  UserRound,
+  Waypoints,
+} from 'lucide-react';
 import { authApi } from '../../api';
 import type { AuthUser } from '../../api/auth';
 
 type AuthMode = 'Sign in' | 'Create account';
 
-export default function AuthPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser, emailNotificationSent: boolean) => void }) {
+interface AuthPageProps {
+  onAuthenticated: (user: AuthUser, emailNotificationSent: boolean) => void;
+}
+
+export default function AuthPage({ onAuthenticated }: AuthPageProps) {
   const [mode, setMode] = useState<AuthMode>('Sign in');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
-  const [uid, setUid] = useState('1001');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,61 +45,197 @@ export default function AuthPage({ onAuthenticated }: { onAuthenticated: (user: 
 
     try {
       if (mode === 'Create account') {
-        if (password !== confirmPassword) throw new Error('Passwords do not match.');
-        const result = await authApi.signUp({ username, email, uid_linux: Number(uid), password });
+        if (password !== confirmPassword) throw new Error('Those passwords don’t match. Try again.');
+        const result = await authApi.signUp({ username, email, password });
         setMessage(result.email_notification_sent
-          ? 'Account created. A sign-up notification was sent to your email.'
-          : 'Account created. Email notification was not sent; check the SMTP configuration.');
+          ? 'Your account is ready. A sign-up alert was sent to your email.'
+          : 'Your account is ready. Email alerts aren’t configured yet.');
         setMode('Sign in');
         setPassword('');
         setConfirmPassword('');
       } else {
-        const result = await authApi.signIn(username, password);
+        const result = await authApi.signIn(email, password, rememberMe);
         const user = await authApi.currentUser();
         setPassword('');
         onAuthenticated(user, result.email_notification_sent);
       }
     } catch (requestError) {
       if (mode === 'Sign in') authApi.signOut();
-      setError(requestError instanceof Error ? requestError.message : 'Unable to complete the request.');
+      setError(requestError instanceof Error ? requestError.message : 'We couldn’t complete that request. Try again.');
     } finally {
       setBusy(false);
     }
   };
 
-  return <div className="auth-entry" data-theme="original">
-    <main className="auth-entry-main">
-      <a className="auth-entry-brand" href="#auth-form" aria-label="OS-DBX authentication">
-        <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><strong>OS-DBX</strong><small>Cross-layer observability</small>
-      </a>
-      <div className="auth-entry-heading"><h1>Welcome to OS-DBX</h1><p>Sign in to open your operating system and database observability workspace.</p></div>
-      <div className="content-two-col auth-entry-grid">
-    <section className="surface-panel access-panel" id="auth-form">
-      <div className="panel-heading"><div><h3>{mode}</h3><p>{mode === 'Sign in' ? 'Access the OS-DBX workspace' : 'Create an OS-DBX account'}</p></div><span className="event-tag tag-lavender">Secure access</span></div>
-      <div className="access-tabs" role="tablist" aria-label="Account access">
-        {(['Sign in', 'Create account'] as const).map((item) => <button type="button" role="tab" aria-selected={mode === item} className={mode === item ? 'chosen' : ''} onClick={() => changeMode(item)} key={item}>{item}</button>)}
-      </div>
-      <form onSubmit={submit}>
-        <label className="field-label">Username<input required minLength={3} maxLength={100} value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" placeholder="Enter username" /></label>
-        {mode === 'Create account' && <>
-          <label className="field-label">Email<input required type="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" /></label>
-          <label className="field-label">Linux user ID (UID)<input required type="number" min="0" value={uid} onChange={(event) => setUid(event.target.value)} placeholder="For example, 1001" /></label>
-        </>}
-        <label className="field-label">Password<input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'Sign in' ? 'current-password' : 'new-password'} placeholder="Enter password" /></label>
-        {mode === 'Create account' && <label className="field-label">Confirm password<input required minLength={6} type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" placeholder="Enter password again" /></label>}
-        {error && <p className="auth-feedback auth-error" role="alert">{error}</p>}
-        {message && <p className="auth-feedback auth-success" role="status"><Check size={14} />{message}</p>}
-        <button type="submit" className="button button-primary access-submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'Sign in' ? 'Continue to workspace' : 'Create account'}</button>
-      </form>
-      <p className="access-note"><LockKeyhole size={13} /> Credentials are sent only to the configured API. SMTP secrets stay on the server.</p>
-    </section>
-    <section className="surface-panel">
-      <div className="panel-heading"><div><h3>Account notifications</h3><p>Sign-up and successful sign-in alerts</p></div></div>
-      <div className="source-distinction"><strong>Email delivery</strong><p>Notifications are sent by the backend to the account email when SMTP is configured. Passwords and SMTP credentials are never included in email or stored by this page.</p></div>
-      <div className="health-facts"><span>Sign-up alert <b>Sent to account email</b></span><span>Login alert <b>Sent after successful authentication</b></span><span>Delivery setup <b>Backend environment settings</b></span></div>
-    </section>
-      </div>
-      <footer className="auth-entry-footer">Local observability workspace · Account credentials are handled by the OS-DBX API</footer>
+  const isSignUp = mode === 'Create account';
+
+  return (
+    <main className="auth-entry">
+      <section className="login-card" aria-label="OS-DBX account access">
+        <aside className="login-story" aria-label="About OS-DBX">
+          <a className="login-brand" href="#account-form" aria-label="OS-DBX home">
+            <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span>
+            <span className="login-brand-name">OS-DBX</span>
+            <span className="login-brand-divider" />
+            <span className="login-brand-caption">Cross-layer observability</span>
+          </a>
+
+          <div className="login-story-copy">
+            <h1>Every event has a story.</h1>
+            <p>Connect operating system activity with database behavior to understand what changed, where, and why.</p>
+          </div>
+
+          <div className="login-map" aria-label="Operating system signals connect through an identity bridge to database activity">
+            <div className="login-map-line" aria-hidden="true"><span /></div>
+            <div className="login-map-node login-map-os">
+              <span className="login-map-icon"><Cpu size={19} strokeWidth={1.7} /></span>
+              <span><strong>Operating system</strong><small>Processes & resources</small></span>
+              <span className="login-node-signal" aria-hidden="true" />
+            </div>
+            <div className="login-map-node login-map-bridge">
+              <span className="login-map-icon"><Waypoints size={19} strokeWidth={1.7} /></span>
+              <span><strong>Identity bridge</strong><small>Evidence-based links</small></span>
+              <span className="login-node-signal" aria-hidden="true" />
+            </div>
+            <div className="login-map-node login-map-dbms">
+              <span className="login-map-icon"><Database size={19} strokeWidth={1.7} /></span>
+              <span><strong>Database activity</strong><small>Queries & transactions</small></span>
+              <span className="login-node-signal" aria-hidden="true" />
+            </div>
+          </div>
+
+          <div className="login-story-foot">
+            <span className="login-foot-mark"><span /><span /><span /></span>
+            <span>One clear view across both layers.</span>
+          </div>
+        </aside>
+
+        <section className="login-form-side">
+          <div className="login-form-topline">
+            <span className="login-secure"><LockKeyhole size={14} /> Secure workspace</span>
+            <span className="login-local-label"><i /> Local environment</span>
+          </div>
+
+          <div className="login-form-content">
+            <div className="login-form-heading">
+              <h2>{isSignUp ? 'Create your account' : 'Welcome back'}</h2>
+              <p>{isSignUp ? 'Set up your account to enter the OS-DBX workspace.' : 'Sign in with your email to continue to your workspace.'}</p>
+            </div>
+
+            <div className="login-tabs" role="tablist" aria-label="Account access">
+              {(['Sign in', 'Create account'] as const).map((item) => (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === item}
+                  className={mode === item ? 'selected' : ''}
+                  onClick={() => changeMode(item)}
+                  key={item}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+
+            <form id="account-form" className="login-form" onSubmit={submit}>
+              {isSignUp && (
+                <label className="login-field" htmlFor="signup-username">
+                  <span>Your name</span>
+                  <span className="login-input-wrap">
+                    <UserRound size={17} aria-hidden="true" />
+                    <input
+                      id="signup-username"
+                      required
+                      minLength={3}
+                      maxLength={100}
+                      value={username}
+                      onChange={(event) => setUsername(event.target.value)}
+                      autoComplete="username"
+                      placeholder="For example, Alex Morgan"
+                    />
+                  </span>
+                </label>
+              )}
+
+              <label className="login-field" htmlFor="account-email">
+                <span>Email address</span>
+                <span className="login-input-wrap">
+                  <Mail size={17} aria-hidden="true" />
+                  <input
+                    id="account-email"
+                    required
+                    type="email"
+                    maxLength={254}
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                  />
+                </span>
+              </label>
+
+              <label className="login-field" htmlFor="account-password">
+                <span>Password</span>
+                <span className="login-input-wrap">
+                  <LockKeyhole size={17} aria-hidden="true" />
+                  <input
+                    id="account-password"
+                    required
+                    minLength={6}
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    placeholder={isSignUp ? 'Create a password' : 'Enter your password'}
+                  />
+                  <button className="password-visibility" type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </span>
+              </label>
+
+              {isSignUp && (
+                <label className="login-field" htmlFor="account-password-confirm">
+                  <span>Confirm password</span>
+                  <span className="login-input-wrap">
+                    <LockKeyhole size={17} aria-hidden="true" />
+                    <input
+                      id="account-password-confirm"
+                      required
+                      minLength={6}
+                      type={showPassword ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      autoComplete="new-password"
+                      placeholder="Enter it again"
+                    />
+                  </span>
+                </label>
+              )}
+
+              {!isSignUp && (
+                <div className="login-form-options">
+                  <label className="remember-option"><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} /><span>Remember me</span></label>
+                  <button type="button" className="forgot-link" onClick={() => setMessage('Password recovery is not set up yet. Please contact your OS-DBX administrator.')}>Forgot password?</button>
+                </div>
+              )}
+
+              {error && <p className="auth-feedback auth-error" role="alert">{error}</p>}
+              {message && <p className="auth-feedback auth-success" role="status">{message}</p>}
+
+              <button type="submit" className="login-submit" disabled={busy}>
+                <span>{busy ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}</span>
+                {!busy && <ArrowRight size={17} aria-hidden="true" />}
+              </button>
+            </form>
+
+            <p className="login-security-note"><LockKeyhole size={14} /> Your credentials are sent to the configured OS-DBX API.</p>
+            <p className="login-email-note">{isSignUp ? 'A sign-up email alert is sent when SMTP is configured.' : 'New sign-in email alerts are sent when SMTP is configured.'}</p>
+          </div>
+
+          <footer className="login-form-footer">OS-DBX · Cross-layer observability workspace</footer>
+        </section>
+      </section>
     </main>
-  </div>;
+  );
 }

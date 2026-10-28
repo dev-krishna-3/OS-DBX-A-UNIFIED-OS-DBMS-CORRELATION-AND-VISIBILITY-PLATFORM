@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'framer-motion';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Check,
@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { events, observations, pageMeta, scenarioNames, sidebarGroups, type ActivityEvent, type SectionId } from './data/demo';
 import AuthPage from './features/auth/AuthPage';
-import { authApi } from './api';
+import { authApi, hasAccessToken } from './api';
 import type { AuthUser } from './api/auth';
 
 const iconMap = {
@@ -77,6 +77,17 @@ function App() {
   const [theme, setTheme] = useState<ThemeId>('original');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authReady, setAuthReady] = useState(() => !hasAccessToken());
+
+  useEffect(() => {
+    if (!hasAccessToken()) return;
+    let active = true;
+    void authApi.currentUser()
+      .then((user) => { if (active) setCurrentUser(user); })
+      .catch(() => { authApi.signOut(); })
+      .finally(() => { if (active) setAuthReady(true); });
+    return () => { active = false; };
+  }, []);
 
   const title = section === 'overview' ? pageMeta.overview.title : (headings[activeTab] ?? pageMeta[section].title);
   const filteredEvents = useMemo(() => events.filter((event) => `${event.title} ${event.detail} ${event.source}`.toLowerCase().includes(search.toLowerCase())), [search]);
@@ -92,8 +103,11 @@ function App() {
     window.setTimeout(() => setNotice(''), 2800);
   };
 
+  if (!authReady) return <main className="auth-session-loading"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><p>Restoring your OS-DBX session…</p></main>;
+
   if (!currentUser) return <AuthPage onAuthenticated={(user, emailNotificationSent) => {
     setCurrentUser(user);
+    setAuthReady(true);
     if (!emailNotificationSent) notify('Signed in, but the email alert was not sent. Check the account email and SMTP configuration.');
   }} />;
 
@@ -115,7 +129,7 @@ function App() {
             <button type="button" className="icon-button header-utility" aria-label="Help" onClick={() => notify('Help is available in the project guide.')}><CircleHelp size={18} /></button>
             <button type="button" className="icon-button header-utility" aria-label="Notifications" onClick={() => notify('You are viewing a local demo workspace.')}><Bell size={18} /></button>
             <span className="topbar-env">Local demo</span>
-            <button type="button" className="profile-mini" aria-label="Open administration for Alex Developer" onClick={() => openSection('admin')}><span className="profile-avatar" aria-hidden="true" /> Alex</button>
+            <button type="button" className="profile-mini" aria-label={`Open administration for ${currentUser.username}`} onClick={() => openSection('admin')}><span className="profile-avatar" aria-hidden="true" /> {currentUser.username}</button>
           </div>
           </div>
           <nav id="primary-navigation" className="primary-nav" aria-label="Main navigation">
@@ -393,7 +407,7 @@ function AccountSettings({ user, onSignOut }: { user: AuthUser; onSignOut: () =>
   return <section className="surface-panel account-settings">
     <div className="panel-heading"><div><h3>Signed-in account</h3><p>Authenticated OS-DBX session</p></div><span className="event-tag tag-lavender">{user.is_admin ? 'Administrator' : 'Member'}</span></div>
     <div className="account-profile"><div className="account-avatar">{user.username.slice(0, 2).toUpperCase()}</div><div><strong>{user.username}</strong><small>{user.email ?? 'No email registered'}</small></div></div>
-    <div className="health-facts"><span>Username <b>{user.username}</b></span><span>Linux UID <b>{user.uid_linux}</b></span><span>Role <b>{user.is_admin ? 'Administrator' : 'Member'}</b></span></div>
+    <div className="health-facts"><span>Username <b>{user.username}</b></span><span>Email <b>{user.email ?? 'Not provided'}</b></span><span>Role <b>{user.is_admin ? 'Administrator' : 'Member'}</b></span></div>
     <button type="button" className="button button-secondary" onClick={onSignOut}>Sign out</button>
   </section>;
 }

@@ -1,10 +1,33 @@
 type RequestOptions = Omit<RequestInit, 'headers'> & { headers?: HeadersInit };
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, '');
-let accessToken: string | null = null;
+const accessTokenKey = 'osdbx_access_token';
 
-export function setAccessToken(token: string | null): void {
+function readStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(accessTokenKey) ?? window.localStorage.getItem(accessTokenKey);
+  } catch {
+    return null;
+  }
+}
+
+let accessToken: string | null = readStoredToken();
+
+export function hasAccessToken(): boolean {
+  return accessToken !== null;
+}
+
+export function setAccessToken(token: string | null, remember = false): void {
   accessToken = token;
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(accessTokenKey);
+    window.localStorage.removeItem(accessTokenKey);
+    if (token) (remember ? window.localStorage : window.sessionStorage).setItem(accessTokenKey, token);
+  } catch {
+    // Keep the in-memory token usable when browser storage is unavailable.
+  }
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {

@@ -4,7 +4,6 @@ export interface AuthUser {
   user_id: number;
   username: string;
   email: string | null;
-  uid_linux: number;
   is_admin: boolean;
   created_at: string;
 }
@@ -22,19 +21,18 @@ export interface RegistrationResult extends AuthUser {
 export interface RegisterRequest {
   username: string;
   email: string;
-  uid_linux: number;
   password: string;
 }
 
 export const authApi = {
-  async signIn(username: string, password: string): Promise<AuthResult> {
-    const body = new URLSearchParams({ username, password });
+  async signIn(email: string, password: string, remember = false): Promise<AuthResult> {
+    const body = new URLSearchParams({ username: email, password });
     const result = await apiRequest<AuthResult>('/auth/token', {
       method: 'POST',
       body,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
-    setAccessToken(result.access_token);
+    setAccessToken(result.access_token, remember);
     return result;
   },
 

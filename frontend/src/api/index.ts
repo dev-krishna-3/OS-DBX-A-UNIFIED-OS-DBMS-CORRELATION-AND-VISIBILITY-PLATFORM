@@ -5,4 +5,4 @@ export { incidentsApi } from './incidents';
 export { observabilityApi } from './observability';
 export { simulationsApi } from './simulations';
 export { workflowsApi } from './workflows';
-export { apiRequest, getJson, postJson, setAccessToken } from './client';
+export { apiRequest, getJson, hasAccessToken, postJson, setAccessToken } from './client';
