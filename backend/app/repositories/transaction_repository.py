@@ -24,8 +24,8 @@ class TransactionRepository:
         try:
             cursor.execute(
                 """
-                INSERT INTO processes (pid, name, state, start_time)
-                VALUES (%s, 'active_workload', 'RUNNING', %s)
+                INSERT INTO processes (pid, user_id, name, state, start_time)
+                VALUES (%s, 1, 'active_workload', 'RUNNING', %s)
                 ON DUPLICATE KEY UPDATE state = 'RUNNING'
                 """,
                 (pid, timestamp),

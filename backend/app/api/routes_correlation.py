@@ -104,13 +104,13 @@ def auto_correlate(
                 cur = connection.cursor(dictionary=True)
                 cur.execute(
                     """
-                    INSERT INTO processes (pid, ppid, name, user, file_path, state, start_time)
-                    VALUES (%s, %s, %s, %s, %s, 'RUNNING', NOW())
+                    INSERT INTO processes (pid, ppid, user_id, name, state, start_time)
+                    VALUES (%s, %s, 1, %s, 'RUNNING', NOW())
                     ON DUPLICATE KEY UPDATE
                         name = VALUES(name),
                         state = 'RUNNING'
                     """,
-                    (discovered_pid, live_proc_ppid, live_proc_name, live_proc_user, live_proc_exe)
+                    (discovered_pid, live_proc_ppid, live_proc_name)
                 )
                 cur.execute(
                     "SELECT transaction_id FROM transactions WHERE pid = %s AND status = 'ACTIVE' ORDER BY transaction_id DESC LIMIT 1",

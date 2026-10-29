@@ -44,8 +44,14 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   const response = await fetch(`${apiBaseUrl}/api${path}`, { ...options, headers });
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { detail?: string } | null;
-    throw new Error(payload?.detail ?? `Request failed (${response.status}).`);
+    const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
+    const detail = payload?.detail;
+    const message = typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail)
+      ? detail.map((item) => (typeof item === 'object' && item && 'msg' in item ? String((item as { msg: unknown }).msg) : JSON.stringify(item))).join('; ')
+      : `Request failed (${response.status}).`;
+    throw new Error(message);
   }
 
   if (response.status === 204) return undefined as T;

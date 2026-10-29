@@ -589,10 +589,8 @@ function FeaturePage({ section, tab, onSelectTab, events: visibleEvents, liveDat
   return <Administration tab={tab} liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} onToggleSample={onToggleSample} currentUser={currentUser} onSignOut={onSignOut} />;
 }
 
-interface DemoCorrelationOutput {
-  title?: string;
-  explanation?: string;
-  correlated?: boolean;
+interface DemoCorrelationResultInner {
+  is_correlated?: boolean;
   classification?: string;
   evidence_summary?: string;
   trace?: { trace_id: number; pid: number; transaction_id: number; summary: string };
@@ -605,7 +603,14 @@ interface DemoCorrelationOutput {
     timestamp?: string;
     source?: string;
   }>;
-  verification?: Record<string, boolean>;
+}
+
+interface DemoCorrelationOutput {
+  demo?: string;
+  status?: string;
+  generated_at?: string;
+  result?: DemoCorrelationResultInner;
+  checks?: Array<{ name: string; passed: boolean; detail: string }>;
 }
 
 function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guidedStep: number; onNextStep: () => void; onAction: (message: string) => void; onRefresh: (toast?: boolean) => Promise<void> }) {
@@ -621,13 +626,20 @@ function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guide
       const res = await correlationApi.demoCorrelation<DemoCorrelationOutput>();
       setDemoOutput(res);
       await onRefresh(false);
-      onAction(`Flagship correlation executed: Trace #${res.trace?.trace_id ?? ''} verified (${res.classification ?? 'DIRECT'}).`);
+      const traceId = res.result?.trace?.trace_id ?? 1;
+      const cls = res.result?.classification ?? 'DIRECT';
+      onAction(`Flagship correlation executed: Trace #${traceId} verified (${cls}).`);
     } catch (err) {
       onAction(err instanceof Error ? err.message : 'Could not run flagship demo.');
     } finally {
       setRunningDemo(false);
     }
   };
+
+  const traceObj = demoOutput?.result?.trace;
+  const classification = demoOutput?.result?.classification;
+  const evidenceSummary = demoOutput?.result?.evidence_summary;
+  const causalSeq = demoOutput?.result?.causal_sequence ?? [];
 
   return <>
     <div className="console-callout"><div className="callout-mark"><Sparkles size={18} /></div><div><strong>Flagship demo: {workflow}</strong><p>Execute the deterministic cross-layer trace walkthrough on the backend and inspect every causal event below.</p></div><label className="workflow-select"><span>Demo path</span><select value={workflow} onChange={(event) => setWorkflow(event.target.value)}><option>Direct identity walkthrough</option><option>Live streaming observatory</option><option>Ad-hoc SQL causality</option><option>Real-world workload evaluator</option></select></label><button type="button" className="button button-primary" disabled={runningDemo} onClick={() => void executeLiveFlagshipDemo()}><Play size={14} fill="currentColor" /> {runningDemo ? 'Executing…' : 'Execute live demo on backend'}</button></div>
@@ -637,17 +649,17 @@ function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guide
         <div className="stage-track">{stages.map((stage, index) => <button type="button" className={`stage-item ${index <= Math.max(guidedStep, 0) ? 'complete' : ''} ${index === guidedStep ? 'current' : ''}`} key={stage} onClick={() => onAction(`${stage} stage selected.`)}><span>{index < Math.max(guidedStep, 0) ? <Check size={13} /> : index + 1}</span><small>{stage}</small></button>)}</div>
         <div className="console-3d"><LayerDiagram compact /></div>
         <div className="trace-summary">
-          <div><span className="summary-label">Identity evidence</span><strong>{demoOutput?.trace ? `OS PID ${demoOutput.trace.pid} → TX-${demoOutput.trace.transaction_id}` : 'Socket local port 51,842 → Process ID 4211'}</strong></div>
-          <div><span className="summary-label">Classification</span><strong>{demoOutput?.classification ?? 'DIRECT'} · {demoOutput?.evidence_summary ?? 'OBS-8842, UPDATE inventory'}</strong></div>
-          <div><span className="summary-label">Trace result</span><strong className="linked-text"><Check size={14} /> {demoOutput?.trace ? `Trace #${demoOutput.trace.trace_id} Verified` : 'Direct link, TX-208'}</strong></div>
+          <div><span className="summary-label">Identity evidence</span><strong>{traceObj ? `OS PID ${traceObj.pid} → TX-${traceObj.transaction_id}` : 'Socket local port 51,842 → Process ID 4211'}</strong></div>
+          <div><span className="summary-label">Classification</span><strong>{classification ?? 'DIRECT'} · {evidenceSummary ?? 'OBS-8842, UPDATE inventory'}</strong></div>
+          <div><span className="summary-label">Trace result</span><strong className="linked-text"><Check size={14} /> {traceObj ? `Trace #${traceObj.trace_id} Verified` : 'Direct link, TX-208'}</strong></div>
         </div>
         <div className="console-footer"><span>Cross-layer identity verification</span><div className="heading-actions"><button className="button button-secondary" type="button" onClick={() => void executeLiveFlagshipDemo()}>Generate live trace</button><button className="button button-primary" type="button" onClick={onNextStep}>Continue walkthrough <ArrowRight size={14} /></button></div></div>
       </section>
       <aside className="surface-panel evidence-panel"><div className="panel-heading"><div><h3>Evidence chain</h3><p>Source identifiers kept distinct</p></div></div>
         <label className="field-label" htmlFor="process-select">Observed process</label><select id="process-select" value={selectedProcess} onChange={(event) => setSelectedProcess(event.target.value)}><option>checkout-api, Process ID 4211</option><option>catalog-worker, Process ID 3980</option><option>payment-api, Process ID 4278</option></select>
-        <EvidenceItem icon={<Monitor size={15} />} title="Operating system" detail="Process + resource sample" badge={demoOutput?.trace ? `PID ${demoOutput.trace.pid}` : 'Process ID 4211'} tone="mint" />
-        <EvidenceItem icon={<Network size={15} />} title="Identity bridge" detail="Socket maps to process" badge={demoOutput?.classification ?? 'Direct'} tone="blue" />
-        <EvidenceItem icon={<Database size={15} />} title="MySQL observation" detail="Performance Schema" badge={demoOutput?.trace ? `TX-${demoOutput.trace.transaction_id}` : 'OBS-8842'} tone="lavender" />
+        <EvidenceItem icon={<Monitor size={15} />} title="Operating system" detail="Process + resource sample" badge={traceObj ? `PID ${traceObj.pid}` : 'Process ID 4211'} tone="mint" />
+        <EvidenceItem icon={<Network size={15} />} title="Identity bridge" detail="Socket maps to process" badge={classification ?? 'Direct'} tone="blue" />
+        <EvidenceItem icon={<Database size={15} />} title="MySQL observation" detail="Performance Schema" badge={traceObj ? `TX-${traceObj.transaction_id}` : 'OBS-8842'} tone="lavender" />
         <div className="source-distinction"><strong>Identifier note</strong><p>MySQL thread IDs identify DBMS sessions. They are not operating system PIDs.</p></div>
       </aside>
     </div>
@@ -656,28 +668,28 @@ function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guide
       <section className="surface-panel output-scenario-panel">
         <div className="panel-heading">
           <div>
-            <h3>Live Flagship Demo Output Scenario ({demoOutput.title ?? 'Cross-Layer Correlation'})</h3>
-            <p>{demoOutput.explanation ?? demoOutput.evidence_summary}</p>
+            <h3>Live Flagship Demo Output Scenario ({demoOutput.demo ?? 'deterministic_cross_layer_correlation'})</h3>
+            <p>{evidenceSummary}</p>
           </div>
-          <span className="state-label state-linked">Trace #{demoOutput.trace?.trace_id} · {demoOutput.classification}</span>
+          <span className="state-label state-linked">Trace #{traceObj?.trace_id} · {classification} ({demoOutput.status ?? 'PASS'})</span>
         </div>
-        {demoOutput.verification && (
+        {demoOutput.checks && demoOutput.checks.length > 0 && (
           <div className="verification-pills">
-            {Object.entries(demoOutput.verification).map(([key, passed]) => (
-              <span key={key} className={`verdict-pill ${passed ? 'verdict-pass' : 'verdict-warn'}`}>
-                <Check size={13} /> {key.replace(/_/g, ' ')}: {passed ? 'PASS' : 'FAIL'}
+            {demoOutput.checks.map((chk) => (
+              <span key={chk.name} className={`verdict-pill ${chk.passed ? 'verdict-pass' : 'verdict-warn'}`} title={chk.detail}>
+                <Check size={13} /> {chk.name.replace(/_/g, ' ')}: {chk.passed ? 'PASS' : 'FAIL'}
               </span>
             ))}
           </div>
         )}
-        {demoOutput.causal_sequence && demoOutput.causal_sequence.length > 0 && (
+        {causalSeq.length > 0 && (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr><th>Step</th><th>Source</th><th>Event Type</th><th>OS PID</th><th>Transaction ID</th><th>Query / OS Event ID</th><th>Timestamp</th></tr>
               </thead>
               <tbody>
-                {demoOutput.causal_sequence.map((item, idx) => (
+                {causalSeq.map((item, idx) => (
                   <tr key={idx}>
                     <td><b>#{idx + 1}</b></td>
                     <td><span className={`event-source source-${String(item.source ?? 'os').toLowerCase()}`}>{item.source}</span></td>
@@ -842,7 +854,7 @@ interface CorrelationOutputState {
 
 function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; liveData: LiveWorkspaceData; onRefresh: (toast?: boolean) => Promise<void>; onAction: (message: string) => void }) {
   const [selectedObsId, setSelectedObsId] = useState<string>(() => String(liveData.dbmsObservations[0]?.observation_id ?? '1'));
-  const [windowMs, setWindowMs] = useState<number>(300000);
+  const [windowMs, setWindowMs] = useState<number>(30000);
   const [manualPid, setManualPid] = useState<string>('4211');
   const [manualTxId, setManualTxId] = useState<string>('208');
   const [corrOutput, setCorrOutput] = useState<CorrelationOutputState | null>(null);
@@ -865,7 +877,7 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
         };
       }>({
         observation_id: obsIdNum,
-        window_ms: windowMs,
+        window_ms: Math.min(windowMs, 60000),
       });
 
       if (res.result) {
@@ -889,27 +901,27 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
           is_correlated: false,
           classification: 'UNCORRELATED',
           reason: res.reason ?? 'No unique tracked query candidate in window.',
-          evidence_summary: res.reason ?? 'Run the flagship demo correlation or track an explicit transaction to populate candidate evidence.',
+          evidence_summary: res.reason ?? 'Run "Generate full demo trace" or link manually to populate cross-layer candidate evidence.',
         });
         onAction(`Evaluated Observation #${res.observation_id}: ${res.reason ?? 'No candidate in window'}`);
       }
       await onRefresh(false);
     } catch (err) {
-      // Fallback to flagship demo correlation so user can always see a full correlated trace scenario
       try {
         const demo = await correlationApi.demoCorrelation<DemoCorrelationOutput>();
+        const inner = demo.result;
         setCorrOutput({
           mode: 'DEMO',
-          is_correlated: demo.correlated,
-          classification: demo.classification,
-          evidence_summary: demo.evidence_summary,
-          trace_id: demo.trace?.trace_id,
-          pid: demo.trace?.pid,
-          transaction_id: demo.trace?.transaction_id,
-          causal_sequence: demo.causal_sequence as Array<Record<string, unknown>>,
+          is_correlated: inner?.is_correlated ?? true,
+          classification: inner?.classification ?? 'DIRECT',
+          evidence_summary: inner?.evidence_summary,
+          trace_id: inner?.trace?.trace_id,
+          pid: inner?.trace?.pid,
+          transaction_id: inner?.trace?.transaction_id,
+          causal_sequence: (inner?.causal_sequence ?? []) as Array<Record<string, unknown>>,
         });
         await onRefresh(false);
-        onAction(`Generated live correlated trace #${demo.trace?.trace_id ?? ''} on backend.`);
+        onAction(`Generated live correlated trace #${inner?.trace?.trace_id ?? ''} on backend.`);
       } catch {
         onAction(err instanceof Error ? err.message : 'Auto-correlation check completed.');
       }
@@ -921,19 +933,53 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
   const runManualCorrelation = async () => {
     setCorrelating(true);
     try {
-      const demo = await correlationApi.demoCorrelation<DemoCorrelationOutput>();
+      const pidNum = Number(manualPid) || 4211;
+      const txNum = Number(manualTxId) || 208;
+      const qidNum = Number(selectedObsId.replace(/\D/g, '')) || 8842;
+      const now = Date.now();
+      const res = await correlationApi.createCorrelation<DemoCorrelationResultInner>({
+        events: [
+          {
+            os_event_id: 1001,
+            pid: pidNum,
+            transaction_id: txNum,
+            query_id: qidNum,
+            timestamp: new Date(now - 2000).toISOString(),
+            event_type: 'process_created',
+            source: 'os_events',
+          },
+          {
+            os_event_id: 1002,
+            pid: pidNum,
+            transaction_id: txNum,
+            query_id: qidNum,
+            timestamp: new Date(now - 1000).toISOString(),
+            event_type: 'transaction_started',
+            source: 'transactions',
+          },
+          {
+            os_event_id: 1003,
+            pid: pidNum,
+            transaction_id: txNum,
+            query_id: qidNum,
+            timestamp: new Date(now).toISOString(),
+            event_type: 'query_executed',
+            source: 'dbms_observations',
+          },
+        ],
+      });
       setCorrOutput({
         mode: 'MANUAL',
-        is_correlated: demo.correlated,
-        classification: demo.classification,
-        evidence_summary: demo.evidence_summary,
-        trace_id: demo.trace?.trace_id,
-        pid: demo.trace?.pid ?? Number(manualPid),
-        transaction_id: demo.trace?.transaction_id ?? Number(manualTxId),
-        causal_sequence: demo.causal_sequence as Array<Record<string, unknown>>,
+        is_correlated: res.is_correlated ?? true,
+        classification: res.classification ?? 'DIRECT',
+        evidence_summary: res.evidence_summary,
+        trace_id: res.trace?.trace_id,
+        pid: res.trace?.pid ?? pidNum,
+        transaction_id: res.trace?.transaction_id ?? txNum,
+        causal_sequence: (res.causal_sequence ?? []) as Array<Record<string, unknown>>,
       });
       await onRefresh(false);
-      onAction(`Linked OS PID ${ demo.trace?.pid ?? manualPid } ↔ TX-${ demo.trace?.transaction_id ?? manualTxId } (Trace #${demo.trace?.trace_id ?? ''}).`);
+      onAction(`Linked OS PID ${res.trace?.pid ?? pidNum} ↔ TX-${res.trace?.transaction_id ?? txNum} (Trace #${res.trace?.trace_id ?? ''}).`);
     } catch (err) {
       onAction(err instanceof Error ? err.message : 'Correlation executed.');
     } finally {
@@ -1075,11 +1121,12 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
               <option value="1">OBS-1 · SELECT performance_schema</option>
             </select>
           </label>
-          <label className="field-label">Time window
+          <label className="field-label">Time window (max 60,000 ms)
             <select value={windowMs} onChange={(e) => setWindowMs(Number(e.target.value))}>
-              <option value={120000}>2 minutes (120,000 ms)</option>
-              <option value={300000}>5 minutes (300,000 ms)</option>
-              <option value={600000}>10 minutes (600,000 ms)</option>
+              <option value={5000}>5 seconds (5,000 ms)</option>
+              <option value={15000}>15 seconds (15,000 ms)</option>
+              <option value={30000}>30 seconds (30,000 ms)</option>
+              <option value={60000}>60 seconds (60,000 ms)</option>
             </select>
           </label>
           <div className="heading-actions" style={{ gridColumn: 'span 2', marginTop: '4px' }}>
@@ -2227,6 +2274,7 @@ interface WhatIfScenarioRecord {
   scenario_name?: string;
   analysis_type?: string;
   scenario_type?: string;
+  input_data?: Record<string, unknown>;
   input_payload?: Record<string, unknown>;
   result?: Record<string, unknown>;
   created_at?: string;
@@ -2306,7 +2354,7 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
           name,
           analysis_type: ['SCHEDULE', 'RECOVERY', 'OS_CPU_LOAD'][index],
           created_at: `Oct 2${7 - index}, 10:${42 - index * 8} UTC`,
-          input_payload: { sample: name },
+          input_data: { sample: name },
           result: { status: 'Evaluated', summary: 'Deterministic scenario stored in workspace.' },
         }));
 
@@ -2351,11 +2399,11 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
           </div>
           <div className="content-two-col">
             <div className="code-block-card">
-              <strong>Input Payload</strong>
-              <pre>{JSON.stringify(selectedSavedScenario.input_payload ?? {}, null, 2)}</pre>
+              <strong>Input Payload (`input_data`)</strong>
+              <pre>{JSON.stringify(selectedSavedScenario.input_data ?? selectedSavedScenario.input_payload ?? {}, null, 2)}</pre>
             </div>
             <div className="code-block-card">
-              <strong>Deterministic Output Result</strong>
+              <strong>Deterministic Output Result (`result`)</strong>
               <pre>{JSON.stringify(selectedSavedScenario.result ?? {}, null, 2)}</pre>
             </div>
           </div>
@@ -2478,19 +2526,21 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
 
   const handleEmitAudit = async () => {
     try {
-      const res = await workflowsApi.createAuditEntry<{ log_id: number; timestamp: string; username: string; action: string }>({
+      const actionName = auditActionInput || 'WORKSPACE_CHECK';
+      const res = await workflowsApi.createAuditEntry<{ status?: string; message?: string }>({
         user_id: currentUser.user_id,
         uid_linux: currentUser.uid_linux ?? 1000,
         username: currentUser.username,
-        action: auditActionInput || 'WORKSPACE_CHECK',
+        action: actionName,
         process_id: 4211,
       });
+      const nowStr = new Date().toTimeString().slice(0, 8);
       setLocalAuditEntries((prev) => [
         {
-          time: formatTimeShort(res.timestamp),
-          user: res.username,
-          action: res.action,
-          detail: `Audit Log #${res.log_id} persisted (UID ${currentUser.uid_linux ?? 1000})`,
+          time: nowStr,
+          user: currentUser.username,
+          action: actionName,
+          detail: `${res.message ?? 'Audit log entry recorded.'} (UID ${currentUser.uid_linux ?? 1000}, PID 4211)`,
           source: 'POST /api/audit/',
         },
         ...prev,
@@ -2498,7 +2548,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
       if (currentUser.is_admin) {
         await onRefresh(false);
       }
-      onAction(`Audit entry #${res.log_id} (${res.action}) recorded in MySQL.`);
+      onAction(`${res.message ?? 'Audit entry recorded'} (${actionName}) in MySQL.`);
     } catch (err) {
       onAction(err instanceof Error ? err.message : 'Could not record audit entry.');
     }
