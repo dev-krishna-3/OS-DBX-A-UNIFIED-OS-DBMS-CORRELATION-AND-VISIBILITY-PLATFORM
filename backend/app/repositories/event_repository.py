@@ -24,7 +24,24 @@ class EventRepository:
         cursor = self.connection.cursor()
         try:
             timestamp = _mysql_datetime(event.timestamp)
-            details = json.dumps({"ppid": event.ppid, "user": event.user})
+            details = json.dumps({
+                "ppid": event.ppid,
+                "user": event.user,
+                "process_name": event.process_name,
+            })
+            cursor.execute(
+                """
+                INSERT IGNORE INTO processes (pid, ppid, name, user, file_path, state)
+                VALUES (%s, %s, %s, %s, %s, 'RUNNING')
+                """,
+                (
+                    event.pid,
+                    event.ppid,
+                    event.process_name or "unknown",
+                    event.user,
+                    event.file_path,
+                ),
+            )
             cursor.execute(
                 """
                 INSERT INTO os_events (pid, event_type, file_path, details, timestamp)
@@ -52,6 +69,7 @@ class EventRepository:
                 """
                 SELECT event_id, pid, event_type, file_path, details, timestamp
                 FROM os_events
+                WHERE pid IS NOT NULL AND pid > 0
                 ORDER BY event_id DESC
                 LIMIT %s
                 """,
@@ -62,18 +80,24 @@ class EventRepository:
             for row in rows:
                 details = row.get("details") or "{}"
                 try:
-                    metadata = json.loads(details)
+                    metadata = json.loads(details) if isinstance(details, str) else (details or {})
                 except (TypeError, json.JSONDecodeError):
                     metadata = {}
+                ppid_val = metadata.get("ppid")
+                try:
+                    ppid_int = max(0, int(ppid_val)) if ppid_val is not None else 0
+                except (ValueError, TypeError):
+                    ppid_int = 0
                 result.append(
                     StoredOSEvent(
                         timestamp=row["timestamp"],
-                        pid=row["pid"],
-                        ppid=metadata.get("ppid") or 0,
-                        user=metadata.get("user") or "unknown",
-                        event_type=row["event_type"],
+                        pid=int(row["pid"]),
+                        ppid=ppid_int,
+                        process_name=metadata.get("process_name") or metadata.get("name"),
+                        user=str(metadata.get("user") or "system"),
+                        event_type=str(row["event_type"]),
                         file_path=row.get("file_path"),
-                        id=row["event_id"],
+                        id=int(row["event_id"]),
                         received_at=row["timestamp"],
                     )
                 )

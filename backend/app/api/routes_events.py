@@ -26,13 +26,14 @@ MAX_LIMIT = 500
 
 
 def get_event_service() -> Iterator[EventService]:
-    """Use durable storage only when explicitly enabled in configuration."""
+    """Use durable MySQL storage when available, falling back to in-memory service."""
 
-    if settings.event_storage.lower() != "mysql":
+    try:
+        connection = get_connection()
+    except Exception:
         yield event_service
         return
 
-    connection = get_connection()
     try:
         yield EventService(repository=EventRepository(connection))
     finally:

@@ -160,3 +160,19 @@ class LockRepository:
             raise
         finally:
             cursor.close()
+
+    def active_locks(self) -> list[dict]:
+        cursor = self.connection.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                SELECT lock_id, transaction_id, data_item, lock_type, status, acquired_at, released_at
+                FROM locks
+                WHERE status IN ('HELD', 'WAITING')
+                ORDER BY lock_id ASC
+                """
+            )
+            return list(cursor.fetchall())
+        finally:
+            cursor.close()
+

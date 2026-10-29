@@ -48,3 +48,17 @@ def replay_incident(
         raise HTTPException(status_code=409, detail="No cross-layer trace available — replay cannot be performed.") from error
     except mysql.connector.Error as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@router.get("/{incident_id}/replays", response_model=list[IncidentReplay])
+def list_incident_replays(
+    incident_id: int,
+    repository: InvestigationRepository = Depends(get_investigation_repository),
+) -> list[IncidentReplay]:
+    try:
+        return repository.list_replays(incident_id)
+    except IncidentNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Incident not found") from error
+    except mysql.connector.Error as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+

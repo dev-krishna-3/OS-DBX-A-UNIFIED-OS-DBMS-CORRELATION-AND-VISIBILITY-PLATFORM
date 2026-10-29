@@ -44,11 +44,17 @@ def list_performance_records(
 _last_disk_read = None
 _last_disk_write = None
 _last_disk_ts = None
+_last_net_sent = None
+_last_net_recv = None
+_last_net_ts = None
+
+from fastapi import Request
 
 @router.get("/system-health")
-def get_system_health() -> dict:
+def get_system_health(request: Request = None) -> dict:
     """Return real-time device-wide system metrics, DBMS metrics, and correlation performance."""
     global _last_disk_read, _last_disk_write, _last_disk_ts
+    global _last_net_sent, _last_net_recv, _last_net_ts
     import os
     import psutil
     from datetime import datetime, timezone
@@ -76,10 +82,36 @@ def get_system_health() -> dict:
     except Exception:
         pass
 
+    net_speed_kbs = 0.0
+    try:
+        net_io = psutil.net_io_counters()
+        if net_io and _last_net_ts:
+            dt = max(0.1, now - _last_net_ts)
+            bytes_diff = (net_io.bytes_sent + net_io.bytes_recv) - (_last_net_sent + _last_net_recv)
+            net_speed_kbs = max(0.0, round((bytes_diff / 1024.0) / dt, 1))
+        if net_io:
+            _last_net_sent = net_io.bytes_sent
+            _last_net_recv = net_io.bytes_recv
+            _last_net_ts = now
+    except Exception:
+        pass
+
     try:
         pcount = len(psutil.pids())
     except Exception:
         pcount = 0
+
+    dropped_events = 0
+    if request is not None:
+        os_stream = getattr(request.app.state, "os_event_stream", None)
+        if os_stream is not None and hasattr(os_stream, "get_metrics"):
+            try:
+                s_metrics = os_stream.get_metrics() or {}
+                dropped_events = int(s_metrics.get("dropped_events", 0))
+            except Exception:
+                pass
+
+    os_event_rate = 0.0
 
     # 2. DBMS Performance & Graceful Availability Check
     dbms_metric = {
@@ -104,6 +136,15 @@ def get_system_health() -> dict:
         conn = get_connection()
         try:
             cur = conn.cursor(dictionary=True)
+            # Real OS event rate from os_events table in the last minute
+            try:
+                cur.execute("SELECT COUNT(*) AS cnt FROM os_events WHERE timestamp >= NOW() - INTERVAL 1 MINUTE")
+                os_row = cur.fetchone()
+                if os_row and os_row.get("cnt") is not None:
+                    os_event_rate = round(float(os_row["cnt"]) / 60.0, 2)
+            except Exception:
+                pass
+
             # Check performance schema flag
             cur.execute("SELECT @@performance_schema AS ps_enabled")
             ps_row = cur.fetchone()
@@ -142,6 +183,20 @@ def get_system_health() -> dict:
                 if l_row:
                     dbms_metric["active_locks"] = l_row.get("active_lks", 0)
 
+                wait_cnt = 0
+                cur.execute("SELECT COUNT(*) AS waiting_lks FROM locks WHERE status = 'WAITING'")
+                w_row = cur.fetchone()
+                if w_row:
+                    wait_cnt += int(w_row.get("waiting_lks") or 0)
+                try:
+                    cur.execute("SELECT COUNT(*) AS ps_waits FROM performance_schema.data_lock_waits")
+                    psw_row = cur.fetchone()
+                    if psw_row:
+                        wait_cnt += int(psw_row.get("ps_waits") or 0)
+                except Exception:
+                    pass
+                dbms_metric["lock_wait_count"] = wait_cnt
+
                 # Correlation statistics
                 cur.execute("SELECT COUNT(*) AS total_traces FROM cross_layer_traces")
                 tr_row = cur.fetchone()
@@ -158,7 +213,16 @@ def get_system_health() -> dict:
                 if ev_row:
                     corr_metric["direct_matches"] = ev_row.get("direct_cnt", 0)
                     corr_metric["temporal_matches"] = ev_row.get("temporal_cnt", 0)
-                corr_metric["avg_correlation_latency_ms"] = 3.8
+
+                try:
+                    cur.execute("SELECT AVG(metric_value) AS avg_lat FROM performance_records WHERE metric_name LIKE '%latency%'")
+                    pr_row = cur.fetchone()
+                    if pr_row and pr_row.get("avg_lat") is not None:
+                        corr_metric["avg_correlation_latency_ms"] = round(float(pr_row["avg_lat"]), 2)
+                    else:
+                        corr_metric["avg_correlation_latency_ms"] = round(float(dbms_metric["avg_query_latency_ms"] or 1.2), 2)
+                except Exception:
+                    corr_metric["avg_correlation_latency_ms"] = 1.2
             else:
                 dbms_metric["reason"] = "MySQL Performance Schema is disabled on this server."
             cur.close()
@@ -180,16 +244,17 @@ def get_system_health() -> dict:
             "memory_used_mb": mem_used_mb,
             "memory_total_mb": mem_total_mb,
             "disk_io_mbs": disk_speed_mbs,
+            "network_io_kbs": net_speed_kbs,
             "process_count": pcount,
-            "os_event_rate_per_sec": 120.0,
+            "os_event_rate_per_sec": os_event_rate,
             "os_event_latency_ms": 1.2,
-            "dropped_events": 0
+            "dropped_events": dropped_events
         },
         "dbms": dbms_metric,
         "correlation": corr_metric,
         "overhead": {
             "agent_cpu_percent": overhead_cpu,
             "agent_memory_mb": overhead_mem_mb,
-            "observability_status": "NORMAL"
+            "observability_status": "NORMAL" if dropped_events == 0 else "DEGRADED"
         }
     }

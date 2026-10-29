@@ -134,6 +134,90 @@ class BlastRadiusService:
             except Exception:
                 pass
 
+        # 5. Stored incident evidence lookup (for persisted incidents in MySQL)
+        try:
+            import json
+            repo = getattr(self.lock_manager, "repository", None)
+            conn = getattr(repo, "connection", None)
+            if conn is not None and hasattr(conn, "cursor"):
+                cur = conn.cursor(dictionary=True)
+                cur.execute(
+                    "SELECT incident_id, incident_type, evidence FROM incidents WHERE incident_id = %s",
+                    (incident_id,),
+                )
+                inc_row = cur.fetchone()
+                if inc_row and inc_row.get("evidence"):
+                    ev = inc_row["evidence"]
+                    ev_data = json.loads(ev) if isinstance(ev, str) else (ev or {})
+                    for tx in ev_data.get("cycle", []):
+                        cycle_tx_ids.add(tx)
+                        resources.append(
+                            AffectedResource(
+                                resource_type=ResourceType.TRANSACTION,
+                                resource_id=str(tx),
+                                impact_level=ImpactLevel.DIRECT,
+                                evidence=ImpactEvidence(
+                                    rule_applied="INCIDENT_EVIDENCE_CYCLE",
+                                    relationship=f"Transaction {tx} recorded in incident {incident_id} deadlock cycle.",
+                                ),
+                            )
+                        )
+                    wfg = ev_data.get("waits_for_graph", {})
+                    if isinstance(wfg, dict):
+                        for waiter, holders in wfg.items():
+                            w_int = int(waiter) if str(waiter).isdigit() else waiter
+                            if w_int not in cycle_tx_ids:
+                                resources.append(
+                                    AffectedResource(
+                                        resource_type=ResourceType.TRANSACTION,
+                                        resource_id=str(waiter),
+                                        impact_level=ImpactLevel.INDIRECT,
+                                        evidence=ImpactEvidence(
+                                            rule_applied="INCIDENT_WAITS_FOR_GRAPH",
+                                            relationship=f"Transaction {waiter} waited on {holders}.",
+                                        ),
+                                    )
+                                )
+                    if cycle_tx_ids:
+                        tx_ints = [int(t) for t in cycle_tx_ids if str(t).isdigit()]
+                        if tx_ints:
+                            placeholders = ", ".join(["%s"] * len(tx_ints))
+                            cur.execute(
+                                f"SELECT DISTINCT pid FROM transactions WHERE transaction_id IN ({placeholders}) AND pid IS NOT NULL",
+                                tuple(tx_ints),
+                            )
+                            for p_row in cur.fetchall():
+                                resources.append(
+                                    AffectedResource(
+                                        resource_type=ResourceType.OS_PROCESS,
+                                        resource_id=str(p_row["pid"]),
+                                        impact_level=ImpactLevel.DIRECT,
+                                        evidence=ImpactEvidence(
+                                            rule_applied="TRANSACTION_OWNER_PROCESS",
+                                            relationship="OS process owning a deadlocked transaction.",
+                                        ),
+                                    )
+                                )
+                            cur.execute(
+                                f"SELECT DISTINCT data_item FROM locks WHERE transaction_id IN ({placeholders})",
+                                tuple(tx_ints),
+                            )
+                            for l_row in cur.fetchall():
+                                resources.append(
+                                    AffectedResource(
+                                        resource_type=ResourceType.LOCK,
+                                        resource_id=str(l_row["data_item"]),
+                                        impact_level=ImpactLevel.DIRECT,
+                                        evidence=ImpactEvidence(
+                                            rule_applied="DEADLOCK_CONTENDED_ITEM",
+                                            relationship="Data item locked by deadlocked transaction.",
+                                        ),
+                                    )
+                                )
+                cur.close()
+        except Exception:
+            pass
+
         unique_resources = {}
         for r in resources:
             key = f"{r.resource_type.value}:{r.resource_id}"

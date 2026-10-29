@@ -7,6 +7,8 @@ import psutil
 import mysql.connector
 
 class IdentityBridgeService:
+    _recent_conn_to_pid: dict[int, int] = {}
+
     def __init__(self, host="localhost", user="root", password="", database="information_schema", port=3306):
         self.host = host
         self.port = port
@@ -88,18 +90,19 @@ class IdentityBridgeService:
     def build_pid_to_connection_map(self) -> dict[int, int]:
         """Builds a map of OS PID -> MySQL PROCESSLIST_ID."""
         client_ports = self.get_os_client_ports()
-        if not client_ports:
-            return {}
-
-        pid_map = {}
+        pid_map: dict[int, int] = {}
         conn = None
         try:
             conn = self._get_mysql_connection()
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT ID, HOST FROM processlist WHERE HOST IS NOT NULL")
+            my_conn_id = getattr(conn, "connection_id", None)
+            cursor.execute("SELECT ID, HOST FROM information_schema.processlist WHERE HOST IS NOT NULL")
             rows = cursor.fetchall()
             
             for row in rows:
+                processlist_id = row['ID']
+                if my_conn_id and processlist_id == my_conn_id:
+                    continue
                 host_str = row['HOST']
                 if host_str and ':' in host_str:
                     port_str = host_str.split(':')[-1]
@@ -107,8 +110,33 @@ class IdentityBridgeService:
                         port = int(port_str)
                         if port in client_ports:
                             pid = client_ports[port]
-                            processlist_id = row['ID']
                             pid_map[pid] = processlist_id
+                            self._recent_conn_to_pid[int(processlist_id)] = int(pid)
+
+            # Supplement with performance_schema.session_connect_attrs (_pid)
+            try:
+                cursor.execute(
+                    """
+                    SELECT PROCESSLIST_ID, ATTR_VALUE
+                    FROM performance_schema.session_connect_attrs
+                    WHERE ATTR_NAME = '_pid' AND ATTR_VALUE IS NOT NULL
+                    """
+                )
+                for sca_row in cursor.fetchall():
+                    pl_id = int(sca_row["PROCESSLIST_ID"])
+                    if my_conn_id and pl_id == my_conn_id:
+                        continue
+                    val = str(sca_row["ATTR_VALUE"]).strip()
+                    if val.isdigit():
+                        c_pid = int(val)
+                        if psutil.pid_exists(c_pid):
+                            pid_map.setdefault(c_pid, pl_id)
+                            self._recent_conn_to_pid[pl_id] = c_pid
+            except Exception:
+                pass
+
+            if len(self._recent_conn_to_pid) > 2000:
+                self._recent_conn_to_pid.clear()
         except Exception as e:
             print(f"IdentityBridge error: {e}")
         finally:
@@ -123,4 +151,7 @@ class IdentityBridgeService:
         for pid, conn_id in pid_map.items():
             if conn_id == processlist_id:
                 return pid
+        cached_pid = self._recent_conn_to_pid.get(int(processlist_id))
+        if cached_pid and psutil.pid_exists(cached_pid):
+            return cached_pid
         return None

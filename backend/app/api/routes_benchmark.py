@@ -10,7 +10,7 @@ from app.services.benchmark_service import BenchmarkRunnerService
 from app.services.lock_manager import LockManager
 from app.services.transaction_service import TransactionService
 
-router = APIRouter(prefix="/api/v1/benchmarks", tags=["benchmarks"])
+router = APIRouter(tags=["benchmarks"])
 
 
 def get_benchmark_service(connection=Depends(get_connection)):
@@ -22,13 +22,16 @@ def get_benchmark_service(connection=Depends(get_connection)):
         connection.close()
 
 
-@router.get("/scenarios", response_model=list[str])
+@router.get("/api/v1/benchmarks/scenarios", response_model=list[str])
+@router.get("/api/benchmark/scenarios", response_model=list[str], include_in_schema=False)
 async def get_scenarios() -> list[str]:
     """List available deterministic benchmark scenarios."""
     return [scenario.value for scenario in BenchmarkScenarioType]
 
 
-@router.post("/run", response_model=BenchmarkResult)
+@router.post("/api/v1/benchmarks/run", response_model=BenchmarkResult)
+@router.post("/api/benchmark/run", response_model=BenchmarkResult, include_in_schema=False)
 async def run_benchmark(config: BenchmarkConfig, service: BenchmarkRunnerService = Depends(get_benchmark_service)) -> BenchmarkResult:
     """Execute a deterministic benchmark scenario and return measurements."""
     return service.run_benchmark(config)
+

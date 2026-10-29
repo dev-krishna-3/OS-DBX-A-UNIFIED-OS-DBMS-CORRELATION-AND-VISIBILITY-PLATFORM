@@ -51,3 +51,20 @@ class TransactionService:
     def rollback(self, transaction_id: int) -> None:
         self.repository.finish(transaction_id, "ROLLED_BACK", utc_now())
         self._require_lock_manager().release_all(transaction_id)
+
+    def begin_transaction(self, pid: int | None = None, isolation_level: str = "READ_COMMITTED") -> int:
+        import os
+        effective_pid = pid if pid and pid > 0 else os.getpid()
+        return self.begin(effective_pid, isolation_level)
+
+    def commit_transaction(self, transaction_id: int) -> None:
+        self.commit(transaction_id)
+
+    def rollback_transaction(self, transaction_id: int) -> None:
+        self.rollback(transaction_id)
+
+    def get_active_transactions(self) -> list[int]:
+        if hasattr(self.repository, "list_active_ids"):
+            return self.repository.list_active_ids()
+        return []
+

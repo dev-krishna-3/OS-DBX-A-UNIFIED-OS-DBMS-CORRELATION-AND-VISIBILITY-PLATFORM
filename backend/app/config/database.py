@@ -9,7 +9,7 @@ from app.config.settings import settings
 try:
     _connection_pool = pooling.MySQLConnectionPool(
         pool_name="osdbx_pool",
-        pool_size=10,
+        pool_size=25,
         pool_reset_session=True,
         host=settings.mysql_host,
         port=settings.mysql_port,

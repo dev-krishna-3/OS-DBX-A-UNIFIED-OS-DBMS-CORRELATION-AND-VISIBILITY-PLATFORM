@@ -39,7 +39,7 @@ def log_cli_action(action: str, details: str = ""):
 
 def display_live_health_panel():
     try:
-        r = session.get(f"{API_BASE_URL}/api/performance/system-health", timeout=1.5)
+        r = session.get(f"{API_BASE_URL}/api/performance/system-health", headers=get_headers(), timeout=1.5)
         if r.status_code == 200:
             h = r.json()
             sys_m = h.get("system", {})
@@ -579,18 +579,35 @@ def run_live_streaming_observatory():
         os_item = os_list[i] if i < len(os_list) else {}
         db_item = db_list[i] if i < len(db_list) else {}
 
-        os_pid = os_item.get("pid") or "-"
-        os_ev = os_item.get("event_type") or "-"
         conn_id = db_item.get("connection_id")
+        bridged_pid = bridge_map.get(conn_id) if conn_id else None
+        if bridged_pid:
+            matched_os = next((o for o in os_list if o.get("pid") == bridged_pid), None)
+            if matched_os:
+                os_item = matched_os
+
+        os_pid = os_item.get("pid") or (bridged_pid if bridged_pid else "-")
+        os_ev = os_item.get("event_type") or ("socket_active" if bridged_pid else "-")
         qtext = db_item.get("query_text", "-")
         if len(qtext) > 35:
             qtext = qtext[:33] + ".."
         lat = f"{db_item.get('execution_time_ms', 0.0):.2f}" if db_item else "-"
 
-        # Correlation Classification
-        if conn_id and conn_id in bridge_map:
+        # Correlation Classification: never claim TEMPORAL by array index alone
+        is_temporal_close = False
+        if db_item and os_item and db_item.get("observed_at") and os_item.get("timestamp"):
+            try:
+                from datetime import datetime
+                t_db = datetime.fromisoformat(str(db_item["observed_at"]).replace("Z", "+00:00")).replace(tzinfo=None)
+                t_os = datetime.fromisoformat(str(os_item["timestamp"]).replace("Z", "+00:00")).replace(tzinfo=None)
+                if abs((t_db - t_os).total_seconds()) <= 5.0:
+                    is_temporal_close = True
+            except Exception:
+                pass
+
+        if bridged_pid is not None:
             causality = "[bold green]DIRECT [SOCKET][/bold green]"
-        elif db_item and os_item:
+        elif is_temporal_close:
             causality = "[bold yellow]TEMPORAL[/bold yellow]"
         else:
             causality = "[dim]NOT CORRELATED[/dim]"
@@ -710,60 +727,67 @@ def run_live_adhoc_sql_causality():
     conn_id = None
     local_port = None
 
-    with console.status("[bold green]Executing SQL query and capturing network socket..."):
-        try:
-            conn = mysql.connector.connect(
-                host=settings.mysql_host,
-                port=settings.mysql_port,
-                user=settings.mysql_user,
-                password=settings.mysql_password,
-                database=settings.mysql_database
-            )
-            conn_id = conn.connection_id
-            for c in psutil.net_connections(kind='tcp'):
-                if c.pid == caller_pid and c.raddr and c.raddr.port == settings.mysql_port:
-                    local_port = c.laddr.port
+    conn = None
+    try:
+        with console.status("[bold green]Executing SQL query and capturing network socket..."):
+            try:
+                conn = mysql.connector.connect(
+                    host=settings.mysql_host,
+                    port=settings.mysql_port,
+                    user=settings.mysql_user,
+                    password=settings.mysql_password,
+                    database=settings.mysql_database
+                )
+                conn_id = conn.connection_id
+                for c in psutil.net_connections(kind='tcp'):
+                    if c.pid == caller_pid and c.raddr and c.raddr.port == settings.mysql_port:
+                        local_port = c.laddr.port
+                        break
+
+                cursor = conn.cursor()
+                cursor.execute(query_text)
+                if cursor.description:
+                    rows = cursor.fetchall()
+                    col_names = [d[0] for d in cursor.description]
+                else:
+                    conn.commit()
+                    affected = cursor.rowcount
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                cursor.close()
+            except Exception as err:
+                console.print(f"[bold red]Query Execution Failed: {err}[/bold red]")
+                return
+
+        with console.status("[bold blue]Collecting statement from MySQL Performance Schema..."):
+            session.post(f"{API_BASE_URL}/api/dbms-events/collect", json={"limit": 10, "persist": True}, headers=get_headers())
+            r_obs = session.get(f"{API_BASE_URL}/api/dbms-events/observations?limit=5", headers=get_headers())
+
+        matching_obs = None
+        if r_obs.status_code == 200:
+            obs_list = r_obs.json()
+            for o in obs_list:
+                if o.get("connection_id") == conn_id or query_text.strip().lower() in o.get("query_text", "").strip().lower():
+                    matching_obs = o
                     break
+            if not matching_obs and obs_list:
+                matching_obs = obs_list[0]
 
-            cursor = conn.cursor()
-            cursor.execute(query_text)
-            if cursor.description:
-                rows = cursor.fetchall()
-                col_names = [d[0] for d in cursor.description]
-            else:
-                conn.commit()
-                affected = cursor.rowcount
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            cursor.close()
-            conn.close()
-        except Exception as err:
-            console.print(f"[bold red]Query Execution Failed: {err}[/bold red]")
-            return
-
-    with console.status("[bold blue]Collecting statement from MySQL Performance Schema..."):
-        session.post(f"{API_BASE_URL}/api/dbms-events/collect", json={"limit": 10, "persist": True}, headers=get_headers())
-        r_obs = session.get(f"{API_BASE_URL}/api/dbms-events/observations?limit=5", headers=get_headers())
-
-    matching_obs = None
-    if r_obs.status_code == 200:
-        obs_list = r_obs.json()
-        for o in obs_list:
-            if o.get("connection_id") == conn_id or query_text.strip().lower() in o.get("query_text", "").strip().lower():
-                matching_obs = o
-                break
-        if not matching_obs and obs_list:
-            matching_obs = obs_list[0]
-
-    auto_res = None
-    if matching_obs:
-        with console.status("[bold magenta]Executing Deterministic Cross-Layer Correlation..."):
-            r_corr = session.post(f"{API_BASE_URL}/api/correlations/auto", json={
-                "observation_id": matching_obs["observation_id"],
-                "window_ms": 10000,
-                "persist": True
-            }, headers=get_headers())
-            if r_corr.status_code == 200:
-                auto_res = r_corr.json()
+        auto_res = None
+        if matching_obs:
+            with console.status("[bold magenta]Executing Deterministic Cross-Layer Correlation..."):
+                r_corr = session.post(f"{API_BASE_URL}/api/correlations/auto", json={
+                    "observation_id": matching_obs["observation_id"],
+                    "window_ms": 10000,
+                    "persist": True
+                }, headers=get_headers())
+                if r_corr.status_code == 200:
+                    auto_res = r_corr.json()
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     classification = "[DIRECTLY CORRELATED]" if (auto_res and auto_res.get("result", {}).get("classification") == "DIRECT") else "[TEMPORALLY RELATED]"
     trace_id = auto_res.get("result", {}).get("trace", {}).get("trace_id", "Generated") if auto_res else "N/A"
@@ -1579,7 +1603,7 @@ def run_benchmark():
         return
 
     with console.status(f"[bold magenta]Running Benchmark ({scenario}, {ops} ops)..."):
-        r = session.post(f"{API_BASE_URL}/api/benchmark/run", json={
+        r = session.post(f"{API_BASE_URL}/api/v1/benchmarks/run", json={
             "scenario": scenario,
             "operations": ops,
             "concurrency": 1

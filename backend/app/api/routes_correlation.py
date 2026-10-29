@@ -63,6 +63,7 @@ def auto_correlate(
 
         bridge = IdentityBridgeService(
             host=settings.mysql_host,
+            port=settings.mysql_port,
             user=settings.mysql_user,
             password=settings.mysql_password,
             database="information_schema"
@@ -71,14 +72,45 @@ def auto_correlate(
         connection_id = observation.get("connection_id")
         discovered_pid = bridge.get_pid_for_connection(connection_id) if connection_id else None
         
+        # Verify live OS process details if a PID was resolved via Identity Bridge
+        live_proc_name = "active_workload"
+        live_proc_user = "system"
+        live_proc_ppid = 0
+        live_proc_exe = None
+        pid_verified_alive = False
+        if discovered_pid:
+            try:
+                import psutil
+                if psutil.pid_exists(discovered_pid):
+                    p = psutil.Process(discovered_pid)
+                    live_proc_name = p.name() or "active_workload"
+                    live_proc_ppid = p.ppid() or 0
+                    pid_verified_alive = True
+                    try:
+                        live_proc_user = p.username() or "system"
+                    except Exception:
+                        pass
+                    try:
+                        live_proc_exe = p.exe() or None
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         # 2. Find matching query executions (favoring the discovered PID if available)
         queries = candidates.matching_queries(observation, request.window_ms)
-        if not queries and discovered_pid and hasattr(connection, "cursor"):
+        if not queries and discovered_pid and pid_verified_alive and hasattr(connection, "cursor"):
             try:
                 cur = connection.cursor(dictionary=True)
                 cur.execute(
-                    "INSERT INTO processes (pid, name, state, start_time) VALUES (%s, 'active_workload', 'RUNNING', NOW()) ON DUPLICATE KEY UPDATE state = 'RUNNING'",
-                    (discovered_pid,)
+                    """
+                    INSERT INTO processes (pid, ppid, name, user, file_path, state, start_time)
+                    VALUES (%s, %s, %s, %s, %s, 'RUNNING', NOW())
+                    ON DUPLICATE KEY UPDATE
+                        name = VALUES(name),
+                        state = 'RUNNING'
+                    """,
+                    (discovered_pid, live_proc_ppid, live_proc_name, live_proc_user, live_proc_exe)
                 )
                 cur.execute(
                     "SELECT transaction_id FROM transactions WHERE pid = %s AND status = 'ACTIVE' ORDER BY transaction_id DESC LIMIT 1",
@@ -116,7 +148,7 @@ def auto_correlate(
         
         # If we discovered a PID, filter queries to that specific PID.
         if discovered_pid:
-            exact_queries = [q for q in queries if q["pid"] == discovered_pid]
+            exact_queries = [q for q in queries if q.get("pid") == discovered_pid]
             if exact_queries:
                 queries = exact_queries
                 
@@ -132,23 +164,36 @@ def auto_correlate(
 
         # 3. Find matching OS events for the query's PID
         os_events = candidates.matching_os_events(query, request.window_ms)
-        if not os_events and discovered_pid and hasattr(connection, "cursor"):
+        if not os_events and discovered_pid and pid_verified_alive and hasattr(connection, "cursor"):
             try:
+                import json
                 cur = connection.cursor(dictionary=True)
                 cur.execute(
-                    "SELECT event_id, pid, event_type, timestamp FROM os_events WHERE pid = %s ORDER BY event_id DESC LIMIT 3",
-                    (discovered_pid,)
+                    """
+                    SELECT event_id, pid, event_type, timestamp
+                    FROM os_events
+                    WHERE pid = %s
+                      AND ABS(TIMESTAMPDIFF(SECOND, timestamp, %s)) <= 300
+                    ORDER BY event_id DESC LIMIT 3
+                    """,
+                    (discovered_pid, query["timestamp"])
                 )
                 nearby = cur.fetchall()
                 if nearby:
                     os_events = nearby
                 else:
+                    details_json = json.dumps({
+                        "ppid": live_proc_ppid,
+                        "user": live_proc_user,
+                        "process_name": live_proc_name,
+                        "connection_id": connection_id,
+                    })
                     cur.execute(
-                        "INSERT INTO os_events (pid, event_type, timestamp, details) VALUES (%s, 'socket_connected', %s, %s)",
-                        (discovered_pid, query["timestamp"], f'{{"connection_id": {connection_id}}}')
+                        "INSERT INTO os_events (pid, event_type, file_path, timestamp, details) VALUES (%s, 'process_created', %s, %s, %s)",
+                        (discovered_pid, live_proc_exe, query["timestamp"], details_json)
                     )
                     connection.commit()
-                    os_events = [{"event_id": cur.lastrowid, "pid": discovered_pid, "event_type": "socket_connected", "timestamp": query["timestamp"]}]
+                    os_events = [{"event_id": cur.lastrowid, "pid": discovered_pid, "event_type": "process_created", "timestamp": query["timestamp"]}]
                 cur.close()
             except Exception:
                 pass
@@ -163,10 +208,10 @@ def auto_correlate(
         from app.models.correlation_classification import CorrelationClassification
 
         # 4. Determine Classification and Evidence
-        is_direct = (discovered_pid is not None and discovered_pid == query["pid"])
+        is_direct = (discovered_pid is not None and pid_verified_alive and discovered_pid == query["pid"])
         classification_enum = CorrelationClassification.DIRECT if is_direct else CorrelationClassification.TEMPORAL
         evidence_reason = (
-            f"DIRECT: PID {discovered_pid} verified via Identity Bridge (socket match to MySQL connection {connection_id})." 
+            f"DIRECT: PID {discovered_pid} ({live_proc_name}) verified via Identity Bridge (socket match to MySQL connection {connection_id})." 
             if is_direct else
             f"TEMPORAL: Matched via {request.window_ms}ms window (Identity Bridge PID: {discovered_pid}, Query PID: {query['pid']})."
         )

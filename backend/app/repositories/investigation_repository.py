@@ -107,6 +107,40 @@ class InvestigationRepository:
         finally:
             cursor.close()
 
+    def list_replays(self, incident_id: int) -> list[IncidentReplay]:
+        if self._incident(incident_id) is None:
+            raise IncidentNotFoundError(incident_id)
+        cursor = self.connection.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                SELECT replay_id, incident_id, replayed_at, outcome, steps_json, summary
+                FROM incident_replays
+                WHERE incident_id = %s
+                ORDER BY replay_id DESC
+                """,
+                (incident_id,),
+            )
+            results: list[IncidentReplay] = []
+            for row in cursor.fetchall():
+                raw_steps = row.get("steps_json")
+                parsed_steps = json.loads(raw_steps) if isinstance(raw_steps, str) else (raw_steps or [])
+                steps = [InvestigationTimelineEntry(**s) for s in parsed_steps]
+                results.append(
+                    IncidentReplay(
+                        replay_id=int(row["replay_id"]),
+                        incident_id=int(row["incident_id"]),
+                        replayed_at=row["replayed_at"],
+                        outcome=str(row["outcome"]),
+                        steps=steps,
+                        summary=str(row.get("summary") or ""),
+                    )
+                )
+            return results
+        finally:
+            cursor.close()
+
+
     def _incident(self, incident_id: int) -> IncidentRecord | None:
         cursor = self.connection.cursor(dictionary=True)
         try:

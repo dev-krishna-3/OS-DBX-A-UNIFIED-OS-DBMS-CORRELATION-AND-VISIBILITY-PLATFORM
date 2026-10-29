@@ -14,6 +14,9 @@ from app.repositories.dbms_observation_repository import DBMSObservationReposito
 
 router = APIRouter(prefix="/dbms-events", tags=["dbms-events"])
 
+_shared_seen_event_ids: dict[int, int] = {}
+_shared_seen_processlist: set = set()
+
 
 def get_dbms_connection():
     connection = get_connection()
@@ -29,7 +32,12 @@ def collect_dbms_events(
     connection=Depends(get_dbms_connection),
 ) -> CollectDBMSEventsResponse:
     try:
-        observations = MySQLQueryCollector(connection).poll(request.limit)
+        collector = MySQLQueryCollector(
+            connection,
+            seen_event_ids=_shared_seen_event_ids,
+            seen_processlist_queries=_shared_seen_processlist,
+        )
+        observations = collector.poll(request.limit)
         persisted = (
             DBMSObservationRepository(connection).insert_many(observations)
             if request.persist
@@ -69,6 +77,16 @@ def get_dbms_observation_status(connection=Depends(get_dbms_connection)) -> dict
             c_row = cur.fetchone()
             if c_row and c_row.get("ENABLED") in ('YES', 'yes', 1):
                 history_long_enabled = True
+            else:
+                try:
+                    cur.execute(
+                        "UPDATE performance_schema.setup_consumers SET ENABLED = 'YES' "
+                        "WHERE NAME IN ('events_statements_history_long', 'events_statements_history')"
+                    )
+                    connection.commit()
+                    history_long_enabled = True
+                except Exception:
+                    pass
         cur.close()
 
         if ps_enabled:

@@ -64,6 +64,62 @@ def ingest_process_event(event: OSEvent) -> StoredOSEvent:
         # Bounded in-memory cap for development.
         if len(_process_events) > 1000:
             _process_events[:] = _process_events[-1000:]
+
+    try:
+        import json
+        from app.config.database import get_connection
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            ts = event.timestamp
+            if ts.tzinfo is not None:
+                ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+            cur.execute(
+                """
+                INSERT INTO processes (pid, ppid, name, user, file_path, state)
+                VALUES (%s, %s, %s, %s, %s, 'RUNNING')
+                ON DUPLICATE KEY UPDATE
+                    ppid = VALUES(ppid),
+                    name = VALUES(name),
+                    user = VALUES(user),
+                    file_path = COALESCE(VALUES(file_path), file_path)
+                """,
+                (
+                    event.pid,
+                    event.ppid,
+                    event.process_name or "unknown",
+                    event.user,
+                    event.file_path,
+                ),
+            )
+            details = json.dumps({
+                "event_id": event.event_id,
+                "ppid": event.ppid,
+                "user": event.user,
+                "process_name": event.process_name,
+                "host_id": event.host_id,
+                "metadata": event.metadata or {},
+            })
+            cur.execute(
+                """
+                INSERT INTO os_events (pid, event_type, file_path, details, timestamp)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    event.pid,
+                    event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type),
+                    event.file_path,
+                    details,
+                    ts,
+                ),
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
     return stored
 
 
@@ -88,6 +144,65 @@ def ingest_filesystem_event(event: OSFilesystemEvent) -> StoredOSFilesystemEvent
         _filesystem_events.append(stored)
         if len(_filesystem_events) > 1000:
             _filesystem_events[:] = _filesystem_events[-1000:]
+
+    try:
+        import json
+        import os as _os
+        from app.config.database import get_connection
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            ts = event.timestamp
+            if ts.tzinfo is not None:
+                ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+            ev_type = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+            details = json.dumps({
+                "event_id": event.event_id,
+                "host_id": event.host_id,
+                "operation": event.operation,
+                "metadata": event.metadata or {},
+            })
+            cur.execute(
+                """
+                INSERT INTO os_events (pid, event_type, file_path, details, timestamp)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (None, ev_type, event.file_path, details, ts),
+            )
+            if event.file_path:
+                f_path = str(event.file_path)
+                if ev_type in ("dir_created", "dir_deleted"):
+                    cur.execute(
+                        "INSERT IGNORE INTO directories (path) VALUES (%s)",
+                        (f_path[:1024],),
+                    )
+                else:
+                    dir_path = _os.path.dirname(f_path)
+                    if dir_path:
+                        cur.execute(
+                            "INSERT IGNORE INTO directories (path) VALUES (%s)",
+                            (dir_path[:1024],),
+                        )
+                    cur.execute(
+                        """
+                        INSERT INTO files (file_path, file_type, size_bytes, modified_at)
+                        VALUES (%s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE modified_at = VALUES(modified_at)
+                        """,
+                        (
+                            f_path[:1024],
+                            (_os.path.splitext(f_path)[1].lstrip(".") or "file")[:50],
+                            0,
+                            ts,
+                        ),
+                    )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
     return stored
 
 
@@ -131,8 +246,12 @@ def ensure_adapter_started(app) -> tuple[bool, str]:
         return True, "OS watchdog filesystem collector is already running."
 
     try:
-        from osdbx.adapters import WindowsAdapter  # type: ignore[import]
-        from osdbx.stream import EventStream  # type: ignore[import]
+        try:
+            from osdbx.adapters import WindowsAdapter  # type: ignore[import]
+            from osdbx.stream import EventStream  # type: ignore[import]
+        except ImportError:
+            from os_monitor.adapters.windows_adapter import WindowsAdapter
+            from os_monitor.core.stream import LiveEventStream as EventStream
 
         stream = getattr(app.state, "os_event_stream", None)
         if stream is None:
@@ -210,7 +329,7 @@ def list_filesystem_events(limit: int = 50) -> list[dict]:
                 """
                 SELECT event_id AS id, event_type, file_path, timestamp, details
                 FROM os_events
-                WHERE file_path IS NOT NULL OR event_type LIKE 'file_%'
+                WHERE file_path IS NOT NULL OR event_type LIKE 'file_%' OR event_type LIKE 'dir_%'
                 ORDER BY event_id DESC LIMIT %s
                 """,
                 (limit,)
@@ -260,7 +379,40 @@ def list_processes(limit: int = 50) -> list[dict]:
                 "file_path": info.get("file_path"),
                 "state": info.get("state")
             })
-        return sorted(result, key=lambda x: x["pid"])[:limit]
+        sorted_res = sorted(result, key=lambda x: x["pid"])[:limit]
+        try:
+            from app.config.database import get_connection
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                for proc in sorted_res:
+                    cur.execute(
+                        """
+                        INSERT INTO processes (pid, ppid, name, user, file_path, state)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            ppid = VALUES(ppid),
+                            name = VALUES(name),
+                            user = VALUES(user),
+                            file_path = COALESCE(VALUES(file_path), file_path),
+                            state = VALUES(state)
+                        """,
+                        (
+                            proc["pid"],
+                            proc.get("ppid"),
+                            proc.get("name") or "unknown",
+                            proc.get("user") or "system",
+                            proc.get("file_path"),
+                            str(proc.get("state") or "RUNNING")[:50],
+                        ),
+                    )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        return sorted_res
     except Exception as e:
         return []
 
@@ -270,8 +422,43 @@ def list_resource_metrics(limit: int = 50) -> list[dict]:
     """Return real-time per-process resource metrics using Person 1's collector."""
     try:
         from os_monitor.resource_monitor import collect_metrics
-        metrics = collect_metrics()
-        return metrics[:limit]
+        metrics = collect_metrics()[:limit]
+        try:
+            from app.config.database import get_connection
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                for m in metrics:
+                    pid = m.get("pid")
+                    if pid and int(pid) > 0:
+                        cur.execute(
+                            """
+                            INSERT IGNORE INTO processes (pid, ppid, name, user, state)
+                            VALUES (%s, 0, %s, %s, 'RUNNING')
+                            """,
+                            (int(pid), m.get("name") or "unknown", m.get("user") or "system"),
+                        )
+                        cur.execute(
+                            """
+                            INSERT INTO resource_metrics (pid, cpu_percent, memory_mb, io_read_bytes, io_write_bytes, timestamp)
+                            VALUES (%s, %s, %s, %s, %s, NOW())
+                            """,
+                            (
+                                int(pid),
+                                float(m.get("cpu_percent") or 0.0),
+                                float(m.get("memory_rss_mb") or 0.0),
+                                int(m.get("io_read_bytes") or 0),
+                                int(m.get("io_write_bytes") or 0),
+                            ),
+                        )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        return metrics
     except Exception as e:
         return []
+
 

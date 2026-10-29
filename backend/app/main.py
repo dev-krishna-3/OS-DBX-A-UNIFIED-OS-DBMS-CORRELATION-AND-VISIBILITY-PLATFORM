@@ -42,7 +42,7 @@ from app.core.auth import get_current_user
 
 
 def seed_admin_account() -> None:
-    """Ensure a development/test admin account exists safely without hardcoded production passwords."""
+    """Ensure a development/test admin account and email column exist safely."""
     import os
     from app.config.database import get_connection
     from app.core.auth import get_password_hash
@@ -50,6 +50,11 @@ def seed_admin_account() -> None:
     try:
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL UNIQUE")
+            conn.commit()
+        except Exception:
+            pass
         cur.execute("SELECT user_id, is_admin FROM users WHERE username = 'admin'")
         row = cur.fetchone()
         if not row:
@@ -80,21 +85,28 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     
     # 1. Start continuous automatic DBMS observation poller
     async def _consume_dbms_poller():
+        import psutil
         from app.collectors.mysql_query_collector import MySQLQueryCollector
         from app.repositories.dbms_observation_repository import DBMSObservationRepository
         from app.services.identity_bridge import IdentityBridgeService
+        from app.api.routes_dbms_events import _shared_seen_event_ids, _shared_seen_processlist
         while True:
             try:
                 await asyncio.sleep(1.5)
                 conn = get_connection()
                 try:
-                    collector = MySQLQueryCollector(conn)
+                    collector = MySQLQueryCollector(
+                        conn,
+                        seen_event_ids=_shared_seen_event_ids,
+                        seen_processlist_queries=_shared_seen_processlist,
+                    )
                     observations = collector.poll(limit=25)
                     if observations:
                         repo = DBMSObservationRepository(conn)
                         persisted = repo.insert_many(observations)
                         bridge = IdentityBridgeService(
                             host=settings.mysql_host,
+                            port=settings.mysql_port,
                             user=settings.mysql_user,
                             password=settings.mysql_password,
                             database="information_schema"
@@ -102,35 +114,100 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
                         pid_map = bridge.build_pid_to_connection_map()
                         cur = conn.cursor(dictionary=True)
                         for obs in persisted:
-                            if obs.connection_id and obs.connection_id in pid_map.values():
+                            matched_pid = None
+                            if obs.connection_id:
                                 matched_pid = next((p for p, c in pid_map.items() if c == obs.connection_id), None)
-                                if matched_pid:
+                                if matched_pid is None:
+                                    matched_pid = bridge.get_pid_for_connection(obs.connection_id)
+                            if matched_pid:
+                                pname = "active_workload"
+                                try:
+                                    pname = psutil.Process(matched_pid).name() or "active_workload"
+                                except Exception:
+                                    pass
+                                cur.execute(
+                                    """
+                                    INSERT INTO processes (pid, name, state, start_time)
+                                    VALUES (%s, %s, 'RUNNING', %s)
+                                    ON DUPLICATE KEY UPDATE state = 'RUNNING', name = COALESCE(VALUES(name), name)
+                                    """,
+                                    (matched_pid, pname, obs.observed_at)
+                                )
+                                cur.execute(
+                                    "SELECT transaction_id FROM transactions WHERE pid = %s AND status = 'ACTIVE' ORDER BY transaction_id DESC LIMIT 1",
+                                    (matched_pid,)
+                                )
+                                tx_row = cur.fetchone()
+                                if tx_row:
+                                    tx_id = tx_row["transaction_id"]
+                                else:
                                     cur.execute(
-                                        "SELECT event_id FROM os_events WHERE pid = %s ORDER BY event_id DESC LIMIT 1",
-                                        (matched_pid,)
+                                        "INSERT INTO transactions (pid, status, start_time, isolation_level) VALUES (%s, 'ACTIVE', %s, 'READ_COMMITTED')",
+                                        (matched_pid, obs.observed_at)
                                     )
-                                    os_ev = cur.fetchone()
-                                    if os_ev:
+                                    tx_id = cur.lastrowid
+
+                                cur.execute(
+                                    """
+                                    SELECT query_id FROM query_executions
+                                    WHERE pid = %s AND query_text = %s
+                                      AND ABS(TIMESTAMPDIFF(SECOND, timestamp, %s)) <= 5
+                                    ORDER BY query_id DESC LIMIT 1
+                                    """,
+                                    (matched_pid, obs.query_text, obs.observed_at)
+                                )
+                                q_row = cur.fetchone()
+                                if q_row:
+                                    qid = q_row["query_id"]
+                                else:
+                                    cur.execute(
+                                        """
+                                        INSERT INTO query_executions (transaction_id, pid, query_type, query_text, execution_time_ms, rows_affected, status, timestamp)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                        """,
+                                        (tx_id, matched_pid, obs.query_type, obs.query_text, obs.execution_time_ms, obs.rows_affected, obs.status, obs.observed_at)
+                                    )
+                                    qid = cur.lastrowid
+
+                                cur.execute(
+                                    "SELECT event_id FROM os_events WHERE pid = %s ORDER BY event_id DESC LIMIT 1",
+                                    (matched_pid,)
+                                )
+                                os_ev = cur.fetchone()
+                                if not os_ev and psutil.pid_exists(matched_pid):
+                                    cur.execute(
+                                        "INSERT INTO os_events (pid, event_type, timestamp, details) VALUES (%s, 'process_created', %s, %s)",
+                                        (matched_pid, obs.observed_at, f'{{"process_name": "{pname}", "connection_id": {obs.connection_id}}}')
+                                    )
+                                    os_ev = {"event_id": cur.lastrowid}
+
+                                if os_ev:
+                                    cur.execute(
+                                        "SELECT correlation_id FROM event_correlations WHERE db_event_id = %s LIMIT 1",
+                                        (obs.observation_id,)
+                                    )
+                                    if not cur.fetchone():
                                         cur.execute(
-                                            "SELECT trace_id FROM cross_layer_traces WHERE pid = %s AND summary LIKE %s LIMIT 1",
-                                            (matched_pid, f"%Observation #{obs.observation_id}%")
+                                            """
+                                            INSERT INTO cross_layer_traces (pid, transaction_id, started_at, ended_at, summary, status)
+                                            VALUES (%s, %s, %s, %s, %s, 'COMPLETED')
+                                            """,
+                                            (
+                                                matched_pid,
+                                                tx_id,
+                                                obs.observed_at,
+                                                obs.observed_at,
+                                                f"Auto-correlation (Obs #{obs.observation_id}): PID {matched_pid} <-> Conn {obs.connection_id} | {obs.query_text[:40]}"
+                                            )
                                         )
-                                        if not cur.fetchone():
-                                            cur.execute(
-                                                """
-                                                INSERT INTO cross_layer_traces (trace_id, started_at, pid, summary, status)
-                                                VALUES (NULL, %s, %s, %s, 'COMPLETED')
-                                                """,
-                                                (obs.observed_at, matched_pid, f"Auto-correlation: PID {matched_pid} <-> Conn {obs.connection_id} | {obs.query_text[:40]}")
-                                            )
-                                            new_tid = cur.lastrowid
-                                            cur.execute(
-                                                """
-                                                INSERT INTO event_correlations (trace_id, os_event_id, correlation_method, confidence_score, sequence_order)
-                                                VALUES (%s, %s, 'IDENTITY_BRIDGE_SOCKET_MATCH', 1.0, 1)
-                                                """,
-                                                (new_tid, os_ev["event_id"])
-                                            )
+                                        new_tid = cur.lastrowid
+                                        cur.execute(
+                                            """
+                                            INSERT INTO event_correlations (trace_id, os_event_id, db_event_id, query_id, correlation_method, confidence_score, sequence_order)
+                                            VALUES (%s, %s, %s, %s, 'IDENTITY_BRIDGE_SOCKET_MATCH', 1.0, 1)
+                                            """,
+                                            (new_tid, os_ev["event_id"], obs.observation_id, qid)
+                                        )
                         conn.commit()
                         cur.close()
                 except Exception:
@@ -148,13 +225,26 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         pass
 
     try:
-        from osdbx.adapters import WindowsAdapter  # type: ignore[import]
-        from osdbx.stream import EventStream  # type: ignore[import]
+        import os as _os
+        import sys as _sys
+        from datetime import datetime, timezone
+        import json as _json
+
+        _proj_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", ".."))
+        if _proj_root not in _sys.path:
+            _sys.path.insert(0, _proj_root)
+
+        try:
+            from osdbx.adapters import WindowsAdapter  # type: ignore[import]
+            from osdbx.stream import EventStream  # type: ignore[import]
+        except ImportError:
+            from os_monitor.adapters.windows_adapter import WindowsAdapter
+            from os_monitor.core.stream import LiveEventStream as EventStream
 
         os_event_stream = EventStream()
         adapter = WindowsAdapter(
             stream=os_event_stream,
-            watch_paths=getattr(settings, "os_watch_paths", []),
+            watch_paths=getattr(settings, "os_watch_paths", ["."]),
         )
         adapter.start()
         application.state.os_event_stream = os_event_stream
@@ -163,32 +253,68 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         async def _consume_stream():
             while True:
                 try:
-                    events = os_event_stream.consume(block=False)
-                    if events:
+                    first_ev = os_event_stream.consume(block=False)
+                    if first_ev is not None:
+                        batch = first_ev if isinstance(first_ev, list) else [first_ev]
+                        while len(batch) < 25:
+                            nxt = os_event_stream.consume(block=False)
+                            if nxt is None:
+                                break
+                            if isinstance(nxt, list):
+                                batch.extend(nxt)
+                            else:
+                                batch.append(nxt)
+
                         conn = get_connection()
                         try:
                             cursor = conn.cursor()
-                            for ev in events:
+                            for item in batch:
+                                ev = item.to_dict() if hasattr(item, "to_dict") else (item if isinstance(item, dict) else {})
+                                if not ev:
+                                    continue
                                 pid = ev.get("pid")
                                 ev_type = str(ev.get("event_type") or "")
-                                ts = ev.get("timestamp")
+                                raw_ts = ev.get("timestamp")
+                                if isinstance(raw_ts, (int, float)):
+                                    ts = datetime.fromtimestamp(float(raw_ts), tz=timezone.utc).replace(tzinfo=None)
+                                elif isinstance(raw_ts, datetime):
+                                    ts = raw_ts.astimezone(timezone.utc).replace(tzinfo=None) if raw_ts.tzinfo else raw_ts
+                                else:
+                                    ts = datetime.now(timezone.utc).replace(tzinfo=None)
                                 fpath = ev.get("file_path")
+                                meta = ev.get("metadata") or {}
+                                details_str = _json.dumps({
+                                    "process_name": ev.get("process_name"),
+                                    "ppid": meta.get("ppid", 0),
+                                    "user": meta.get("user", "system"),
+                                    "host_id": ev.get("host_id"),
+                                    "evidence_completeness": ev.get("evidence_completeness"),
+                                })
 
                                 cursor.execute(
-                                    "INSERT INTO os_events (pid, event_type, timestamp, file_path) VALUES (%s, %s, %s, %s)",
-                                    (pid, ev_type, ts, fpath)
+                                    "INSERT INTO os_events (pid, event_type, timestamp, file_path, details) VALUES (%s, %s, %s, %s, %s)",
+                                    (pid if (pid and pid > 0) else None, ev_type, ts, fpath, details_str)
                                 )
 
                                 # Populate processes table
                                 if pid and pid > 0:
                                     pname = ev.get("process_name") or "os_process"
+                                    ppid_val = meta.get("ppid")
+                                    res_info = ev.get("resource_info") or {}
+                                    cpu_val = res_info.get("cpu_usage")
+                                    mem_val = res_info.get("memory_usage")
                                     cursor.execute(
                                         """
-                                        INSERT INTO processes (pid, name, state, start_time)
-                                        VALUES (%s, %s, 'RUNNING', %s)
-                                        ON DUPLICATE KEY UPDATE state = 'RUNNING', name = COALESCE(VALUES(name), name)
+                                        INSERT INTO processes (pid, ppid, name, state, cpu_percent, memory_percent, start_time)
+                                        VALUES (%s, %s, %s, 'RUNNING', %s, %s, %s)
+                                        ON DUPLICATE KEY UPDATE
+                                            state = 'RUNNING',
+                                            name = COALESCE(VALUES(name), name),
+                                            ppid = COALESCE(VALUES(ppid), ppid),
+                                            cpu_percent = COALESCE(VALUES(cpu_percent), cpu_percent),
+                                            memory_percent = COALESCE(VALUES(memory_percent), memory_percent)
                                         """,
-                                        (pid, pname, ts)
+                                        (pid, ppid_val, pname, cpu_val, mem_val, ts)
                                     )
                                     if ev_type == "process_terminated":
                                         cursor.execute(
@@ -201,7 +327,6 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
                                     p_row = cursor.fetchone()
                                     if p_row:
                                         proc_id = p_row[0]
-                                        res_info = ev.get("resource_info")
                                         if res_info:
                                             cursor.execute(
                                                 """
@@ -210,7 +335,6 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
                                                 """,
                                                 (proc_id, res_info.get("cpu_usage"), res_info.get("memory_usage"), res_info.get("disk_io"), res_info.get("network_io"), ts)
                                             )
-                                        meta = ev.get("metadata") or {}
                                         threads_list = meta.get("threads") or []
                                         for t in threads_list[:3]:
                                             tid = t.get("id")
@@ -222,9 +346,8 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
                                 # Populate files, directories, permissions for filesystem events
                                 if fpath and ev_type.startswith("file_"):
-                                    import os as _posix_os
                                     cursor.execute("INSERT IGNORE INTO files (file_path, size_bytes) VALUES (%s, %s)", (fpath, 0))
-                                    dpath = _posix_os.path.dirname(fpath) or fpath
+                                    dpath = _os.path.dirname(fpath) or fpath
                                     cursor.execute("INSERT IGNORE INTO directories (path) VALUES (%s)", (dpath,))
                                     cursor.execute("SELECT file_id FROM files WHERE file_path = %s LIMIT 1", (fpath,))
                                     f_row = cursor.fetchone()
@@ -235,7 +358,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
                                         )
                             conn.commit()
                             cursor.close()
-                        except Exception as e:
+                        except Exception:
                             conn.rollback()
                         finally:
                             conn.close()
@@ -264,7 +387,25 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         adapter.stop()
 
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(auth_router, prefix="/api")
 

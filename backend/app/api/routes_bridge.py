@@ -11,6 +11,7 @@ def get_live_identity_map():
     """Returns the real-time mapping of OS PIDs to MySQL Connection IDs."""
     bridge = IdentityBridgeService(
         host=settings.mysql_host,
+        port=settings.mysql_port,
         user=settings.mysql_user,
         password=settings.mysql_password,
         database="information_schema"

@@ -4,8 +4,10 @@
 CREATE TABLE users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) NOT NULL UNIQUE,
+    email VARCHAR(255) NULL UNIQUE,
     uid_linux BIGINT NOT NULL UNIQUE,
     password_hash VARCHAR(255) NULL,
+    is_admin BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -34,9 +36,12 @@ CREATE TABLE processes (
 CREATE TABLE threads (
     thread_id BIGINT AUTO_INCREMENT PRIMARY KEY,
     process_id BIGINT NOT NULL,
-    tid BIGINT NOT NULL UNIQUE,
+    tid BIGINT NOT NULL,
     state VARCHAR(50),
     created_at DATETIME,
+
+    CONSTRAINT uq_thread_process_tid
+        UNIQUE (process_id, tid),
 
     CONSTRAINT fk_thread_process
         FOREIGN KEY (process_id)
@@ -65,7 +70,7 @@ ON system_calls(timestamp);
 #OS_EVENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
 CREATE TABLE os_events (
     event_id INT AUTO_INCREMENT PRIMARY KEY,
-    pid INT NOT NULL,
+    pid INT NULL,
     event_type VARCHAR(100) NOT NULL,
     file_path VARCHAR(1000),
     timestamp DATETIME,
@@ -96,6 +101,8 @@ CREATE TABLE files (
     permissions VARCHAR(20),
     size_bytes BIGINT,
 
+    UNIQUE INDEX uq_files_path (file_path(255)),
+
     CONSTRAINT fk_file_owner
         FOREIGN KEY (owner_id)
         REFERENCES users(user_id)
@@ -106,6 +113,8 @@ CREATE TABLE directories (
     directory_id INT AUTO_INCREMENT PRIMARY KEY,
     path VARCHAR(1000),
     parent_directory_id INT,
+
+    UNIQUE INDEX uq_directories_path (path(255)),
 
     CONSTRAINT fk_directory_parent
         FOREIGN KEY (parent_directory_id)
@@ -443,8 +452,19 @@ CREATE TABLE what_if_scenarios (
     created_at DATETIME NOT NULL
 );
 
+# AUDIT_LOGS stores security and operational audit trails.
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    username VARCHAR(100) NOT NULL,
+    action VARCHAR(255) NOT NULL,
+    details TEXT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 # PERFORMANCE OPTIMIZATION INDEXES
 CREATE INDEX idx_os_events_pid_ts ON os_events(pid, timestamp);
 CREATE INDEX idx_qe_type_text_ts ON query_executions(query_type, timestamp);
 CREATE INDEX idx_incidents_type_resolved ON incidents(incident_type, resolved);
+
 

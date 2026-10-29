@@ -16,6 +16,7 @@ from app.core.auth import (
     get_current_active_user
 )
 from app.models.users import Token, UserCreate, UserOut, UserInDB
+from app.services.email_service import send_signin_notification, send_signup_notification
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -39,28 +40,57 @@ def register_user(
             status_code=400,
             detail="The user with this username already exists in the system.",
         )
+    if user_in.email:
+        existing_email = get_user_by_username(connection, user_in.email)
+        if existing_email:
+            raise HTTPException(
+                status_code=400,
+                detail="An account with this email address already exists.",
+            )
     
     hashed_password = get_password_hash(user_in.password)
     
     try:
         cursor = connection.cursor()
-        cursor.execute(
-            """
-            INSERT INTO users (username, uid_linux, password_hash)
-            VALUES (%s, %s, %s)
-            """,
-            (user_in.username, user_in.uid_linux, hashed_password)
-        )
+        uid_linux = user_in.uid_linux
+        if uid_linux is None:
+            cursor.execute("SELECT COALESCE(MAX(uid_linux), 1000) + 1 FROM users WHERE uid_linux >= 1000")
+            row = cursor.fetchone()
+            uid_linux = int(row[0]) if row and row[0] is not None else 1001
+
+        try:
+            cursor.execute(
+                """
+                INSERT INTO users (username, email, uid_linux, password_hash)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (user_in.username, user_in.email, uid_linux, hashed_password)
+            )
+        except mysql.connector.Error as col_err:
+            if col_err.errno == 1054:  # Unknown column 'email'
+                cursor.execute(
+                    """
+                    INSERT INTO users (username, uid_linux, password_hash)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (user_in.username, uid_linux, hashed_password)
+                )
+            else:
+                raise
         connection.commit()
-        user_id = cursor.lastrowid
         cursor.close()
         
         # Fetch the newly created user
         new_user = get_user_by_username(connection, user_in.username)
-        return new_user
+        email_sent = send_signup_notification(user_in.email, user_in.username)
+        if new_user:
+            out_data = new_user.model_dump()
+            out_data["email_notification_sent"] = email_sent
+            return UserOut(**out_data)
+        raise HTTPException(status_code=500, detail="User created but could not be loaded.")
     except mysql.connector.Error as err:
-        if err.errno == 1062: # Duplicate entry (maybe uid_linux)
-            raise HTTPException(status_code=400, detail="UID Linux or Username already exists")
+        if err.errno == 1062: # Duplicate entry (maybe uid_linux or email)
+            raise HTTPException(status_code=400, detail="UID Linux, Email, or Username already exists")
         raise HTTPException(status_code=500, detail=str(err))
 
 
@@ -74,7 +104,7 @@ def login_access_token(
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect username/email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
@@ -82,7 +112,13 @@ def login_access_token(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    recipient_email = user.email or (form_data.username if "@" in form_data.username else None)
+    email_sent = send_signin_notification(recipient_email, user.username)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "email_notification_sent": email_sent,
+    }
 
 
 @router.get("/me", response_model=UserOut)

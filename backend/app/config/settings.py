@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     dbms_collection_interval_seconds: int = 5
     os_watch_paths: list[str] = ["."]
 
+    # SMTP Email Notification Settings
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+
     model_config = SettingsConfigDict(
         env_file=(".env", "backend/.env"),
         env_file_encoding="utf-8",

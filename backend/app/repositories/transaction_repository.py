@@ -202,3 +202,14 @@ class TransactionRepository:
                 timestamp,
             ),
         )
+
+    def list_active_ids(self) -> list[int]:
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                "SELECT transaction_id FROM transactions WHERE status = 'ACTIVE' ORDER BY transaction_id ASC"
+            )
+            return [int(row[0]) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+

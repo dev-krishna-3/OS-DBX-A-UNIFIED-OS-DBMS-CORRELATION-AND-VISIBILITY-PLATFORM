@@ -47,14 +47,23 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def get_user_by_username(connection: mysql.connector.MySQLConnection, username: str) -> Optional[UserInDB]:
-    """Look up a user by username. Returns None if not found."""
+    """Look up a user by username or email. Returns None if not found."""
     cursor = connection.cursor(dictionary=True)
     try:
-        cursor.execute(
-            "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin FROM users WHERE username = %s",
-            (username,)
-        )
-        user_dict = cursor.fetchone()
+        try:
+            cursor.execute(
+                "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin "
+                "FROM users WHERE username = %s OR email = %s LIMIT 1",
+                (username, username)
+            )
+            user_dict = cursor.fetchone()
+        except Exception:
+            cursor.execute(
+                "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin "
+                "FROM users WHERE username = %s LIMIT 1",
+                (username,)
+            )
+            user_dict = cursor.fetchone()
     finally:
         cursor.close()
 

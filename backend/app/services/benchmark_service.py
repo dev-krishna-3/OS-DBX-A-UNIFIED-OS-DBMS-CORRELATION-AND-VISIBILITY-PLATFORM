@@ -93,6 +93,30 @@ class BenchmarkRunnerService:
         )
         
         ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        try:
+            repo = getattr(self.transaction_service, "repository", None)
+            conn = getattr(repo, "connection", None)
+            if conn is not None and hasattr(conn, "cursor"):
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO performance_records (trace_id, metric_name, metric_value, data_source, recorded_at)
+                    VALUES (NULL, %s, %s, %s, %s)
+                    """,
+                    (f"benchmark_{config.scenario.value.lower()}_duration", round(workload_duration_ms, 3), "BENCHMARK", ended_at),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO performance_records (trace_id, metric_name, metric_value, data_source, recorded_at)
+                    VALUES (NULL, %s, %s, %s, %s)
+                    """,
+                    ("correlation_latency_ms", round(metrics.avg_correlation_latency_ms, 3), "BENCHMARK", ended_at),
+                )
+                conn.commit()
+                cur.close()
+        except Exception:
+            pass
         
         return BenchmarkResult(
             benchmark_id=str(uuid.uuid4()),

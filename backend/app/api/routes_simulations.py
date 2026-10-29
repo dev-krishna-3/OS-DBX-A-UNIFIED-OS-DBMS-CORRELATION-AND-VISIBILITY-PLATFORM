@@ -257,10 +257,15 @@ def run_memory_simulation(req: MemoryRequest) -> Dict[str, Any]:
                     (sim_id, algo, req.num_frames, summary)
                 )
                 exp_id = cur.lastrowid
+                frame_states_list = ret.get("frame_states") or (res_fifo.frame_states if algo == "ALL" else [])
+                prev_frames: set[int] = set()
                 for idx, page_num in enumerate(req.reference_string, 1):
+                    fault_occurred = page_num not in prev_frames
+                    if idx - 1 < len(frame_states_list):
+                        prev_frames = {f for f in frame_states_list[idx - 1] if f is not None and f != -1}
                     cur.execute(
                         "INSERT INTO page_references (experiment_id, page_number, sequence_order, fault_occurred) VALUES (%s, %s, %s, %s)",
-                        (exp_id, page_num, idx, True)
+                        (exp_id, page_num, idx, fault_occurred)
                     )
                 conn.commit()
                 cur.close()
@@ -450,3 +455,43 @@ def run_sync_simulation(req: SyncSimulationRequest) -> Dict[str, Any]:
         "iterations": req.iterations,
         "result_log": log
     }
+
+
+@router.get("/history")
+def list_simulation_history(limit: int = 25) -> Dict[str, Any]:
+    """Read back stored simulation history across all simulation tables."""
+    from app.config.database import get_connection
+    history: Dict[str, Any] = {
+        "simulations": [],
+        "scheduled_processes": [],
+        "memory_experiments": [],
+        "page_references": [],
+        "deadlock_experiments": [],
+        "disk_requests": [],
+        "synchronization_experiments": [],
+    }
+    try:
+        conn = get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT * FROM simulations ORDER BY simulation_id DESC LIMIT %s", (limit,))
+            history["simulations"] = cur.fetchall()
+            cur.execute("SELECT * FROM scheduled_processes ORDER BY schedule_entry_id DESC LIMIT %s", (limit,))
+            history["scheduled_processes"] = cur.fetchall()
+            cur.execute("SELECT * FROM memory_experiments ORDER BY experiment_id DESC LIMIT %s", (limit,))
+            history["memory_experiments"] = cur.fetchall()
+            cur.execute("SELECT * FROM page_references ORDER BY ref_id DESC LIMIT %s", (limit,))
+            history["page_references"] = cur.fetchall()
+            cur.execute("SELECT * FROM deadlock_experiments ORDER BY experiment_id DESC LIMIT %s", (limit,))
+            history["deadlock_experiments"] = cur.fetchall()
+            cur.execute("SELECT * FROM disk_requests ORDER BY request_id DESC LIMIT %s", (limit,))
+            history["disk_requests"] = cur.fetchall()
+            cur.execute("SELECT * FROM synchronization_experiments ORDER BY sync_id DESC LIMIT %s", (limit,))
+            history["synchronization_experiments"] = cur.fetchall()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return history
+
