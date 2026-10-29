@@ -2,6 +2,7 @@ import { apiRequest, postJson, setAccessToken } from './client';
 
 export interface AuthUser {
   user_id: number;
+  uid_linux?: number;
   username: string;
   email: string | null;
   is_admin: boolean;
