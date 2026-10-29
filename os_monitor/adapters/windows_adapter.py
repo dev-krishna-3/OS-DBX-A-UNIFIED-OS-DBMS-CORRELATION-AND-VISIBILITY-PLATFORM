@@ -88,7 +88,7 @@ class WindowsAdapter(OSCollectorAdapter):
                 
         while not self._stop_event.is_set():
             time.sleep(5)
-            for proc in psutil.process_iter(["pid", "name"]):
+            for proc in psutil.process_iter(["pid", "name", "ppid"]):
                 try:
                     pid = proc.info["pid"]
                     if pid == 0: continue # System Idle Process
@@ -102,6 +102,24 @@ class WindowsAdapter(OSCollectorAdapter):
                     io = proc.io_counters() if hasattr(proc, 'io_counters') else None
                     disk_io = (io.read_bytes + io.write_bytes) if io else None
 
+                    # Thread Monitoring
+                    threads = []
+                    try:
+                        for t in proc.threads():
+                            threads.append({"id": t.id, "user_time": t.user_time, "system_time": t.system_time})
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
+                    # Process Tree Reconstruction (Path to root)
+                    process_tree = []
+                    try:
+                        curr = proc
+                        while curr is not None and curr.pid != 0:
+                            process_tree.append(curr.pid)
+                            curr = curr.parent()
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
+
                     event = NormalizedOSEvent(
                         event_type="resource_usage",
                         operation="metric",
@@ -111,7 +129,12 @@ class WindowsAdapter(OSCollectorAdapter):
                             "cpu_usage": round(cpu, 2),
                             "memory_usage": round(mem, 2),
                             "disk_io": disk_io,
-                            "network_io": None
+                            "network_io": None,
+                            "threads_count": len(threads)
+                        },
+                        metadata={
+                            "threads": threads,
+                            "process_tree": process_tree
                         }
                     )
                     self.stream.publish(event)
@@ -122,18 +145,30 @@ class WindowsAdapter(OSCollectorAdapter):
         try:
             from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
+            import os
             
             class NormalizedFSEventHandler(FileSystemEventHandler):
                 def __init__(self, stream):
                     self.stream = stream
                     
+                def _get_permissions(self, path):
+                    try:
+                        return oct(os.stat(path).st_mode)[-3:]
+                    except:
+                        return None
+
                 def _emit(self, op, path, is_dir=False, old_path=None):
+                    perms = self._get_permissions(path)
                     event = NormalizedOSEvent(
                         event_type=f"file_{op}",
                         operation=op,
                         pid=None, # Intentionally null
                         file_path=path,
-                        metadata={"is_directory": is_dir, "old_path": old_path}
+                        metadata={
+                            "is_directory": is_dir, 
+                            "old_path": old_path,
+                            "permissions": perms
+                        }
                     )
                     self.stream.publish(event)
 

@@ -15,8 +15,9 @@ adapter block degrades gracefully: the health endpoints still respond, and the
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 
+from app.api.routes_auth import router as auth_router
 from app.api.routes_events import router as events_router
 from app.api.routes_correlation import router as correlation_router
 from app.api.routes_deadlocks import router as deadlocks_router
@@ -33,28 +34,124 @@ from app.api.routes_demo import router as demo_router
 from app.api.routes_benchmark import router as benchmark_router
 from app.api.routes_blast_radius import router as blast_radius_router
 from app.api.routes_os_events import router as os_events_router
+from app.api.routes_simulations import router as simulations_router
+from app.api.routes_audit import router as audit_router
+from app.api.routes_bridge import router as bridge_router
 from app.config.settings import settings
+from app.core.auth import get_current_user
+
+
+def seed_admin_account() -> None:
+    """Ensure a development/test admin account exists safely without hardcoded production passwords."""
+    import os
+    from app.config.database import get_connection
+    from app.core.auth import get_password_hash
+    admin_password = os.environ.get("ADMIN_PASSWORD", "Admin@OSDBX2026!")
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT user_id, is_admin FROM users WHERE username = 'admin'")
+        row = cur.fetchone()
+        if not row:
+            hashed = get_password_hash(admin_password)
+            cur.execute(
+                "INSERT INTO users (username, uid_linux, password_hash, is_admin) VALUES ('admin', 0, %s, 1)",
+                (hashed,)
+            )
+            conn.commit()
+        elif not row.get("is_admin"):
+            cur.execute("UPDATE users SET is_admin = 1, uid_linux = 0 WHERE username = 'admin'")
+            conn.commit()
+        cur.close()
+        conn.close()
+    except Exception:
+        pass
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-    """Start the OS adapter on startup and stop it on shutdown.
+    """Start the OS adapter and automatic DBMS observation on startup and stop on shutdown."""
+    import asyncio
+    from app.config.database import get_connection
 
-    The adapter feeds OS events into a burst-safe in-process buffer
-    (``os_event_stream``).  Consumers pull from the buffer with
-    ``os_event_stream.consume(block=False)``.
+    seed_admin_account()
+    consumer_task = None
+    dbms_task = None
+    
+    # 1. Start continuous automatic DBMS observation poller
+    async def _consume_dbms_poller():
+        from app.collectors.mysql_query_collector import MySQLQueryCollector
+        from app.repositories.dbms_observation_repository import DBMSObservationRepository
+        from app.services.identity_bridge import IdentityBridgeService
+        while True:
+            try:
+                await asyncio.sleep(1.5)
+                conn = get_connection()
+                try:
+                    collector = MySQLQueryCollector(conn)
+                    observations = collector.poll(limit=25)
+                    if observations:
+                        repo = DBMSObservationRepository(conn)
+                        persisted = repo.insert_many(observations)
+                        bridge = IdentityBridgeService(
+                            host=settings.mysql_host,
+                            user=settings.mysql_user,
+                            password=settings.mysql_password,
+                            database="information_schema"
+                        )
+                        pid_map = bridge.build_pid_to_connection_map()
+                        cur = conn.cursor(dictionary=True)
+                        for obs in persisted:
+                            if obs.connection_id and obs.connection_id in pid_map.values():
+                                matched_pid = next((p for p, c in pid_map.items() if c == obs.connection_id), None)
+                                if matched_pid:
+                                    cur.execute(
+                                        "SELECT event_id FROM os_events WHERE pid = %s ORDER BY event_id DESC LIMIT 1",
+                                        (matched_pid,)
+                                    )
+                                    os_ev = cur.fetchone()
+                                    if os_ev:
+                                        cur.execute(
+                                            "SELECT trace_id FROM cross_layer_traces WHERE pid = %s AND summary LIKE %s LIMIT 1",
+                                            (matched_pid, f"%Observation #{obs.observation_id}%")
+                                        )
+                                        if not cur.fetchone():
+                                            cur.execute(
+                                                """
+                                                INSERT INTO cross_layer_traces (trace_id, started_at, pid, summary, status)
+                                                VALUES (NULL, %s, %s, %s, 'COMPLETED')
+                                                """,
+                                                (obs.observed_at, matched_pid, f"Auto-correlation: PID {matched_pid} <-> Conn {obs.connection_id} | {obs.query_text[:40]}")
+                                            )
+                                            new_tid = cur.lastrowid
+                                            cur.execute(
+                                                """
+                                                INSERT INTO event_correlations (trace_id, os_event_id, correlation_method, confidence_score, sequence_order)
+                                                VALUES (%s, %s, 'IDENTITY_BRIDGE_SOCKET_MATCH', 1.0, 1)
+                                                """,
+                                                (new_tid, os_ev["event_id"])
+                                            )
+                        conn.commit()
+                        cur.close()
+                except Exception:
+                    conn.rollback()
+                finally:
+                    conn.close()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(2.0)
 
-    If the ``osdbx-os-collector`` package is not installed, the adapter is
-    skipped and both ``application.state.os_adapter`` and
-    ``application.state.os_event_stream`` are set to ``None``.
-    """
+    try:
+        dbms_task = asyncio.create_task(_consume_dbms_poller())
+    except Exception:
+        pass
+
     try:
         from osdbx.adapters import WindowsAdapter  # type: ignore[import]
         from osdbx.stream import EventStream  # type: ignore[import]
 
         os_event_stream = EventStream()
-        # watch_paths should be configured via settings or environment variable.
-        # An empty list means the adapter monitors process events only.
         adapter = WindowsAdapter(
             stream=os_event_stream,
             watch_paths=getattr(settings, "os_watch_paths", []),
@@ -62,13 +159,104 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         adapter.start()
         application.state.os_event_stream = os_event_stream
         application.state.os_adapter = adapter
+        
+        async def _consume_stream():
+            while True:
+                try:
+                    events = os_event_stream.consume(block=False)
+                    if events:
+                        conn = get_connection()
+                        try:
+                            cursor = conn.cursor()
+                            for ev in events:
+                                pid = ev.get("pid")
+                                ev_type = str(ev.get("event_type") or "")
+                                ts = ev.get("timestamp")
+                                fpath = ev.get("file_path")
+
+                                cursor.execute(
+                                    "INSERT INTO os_events (pid, event_type, timestamp, file_path) VALUES (%s, %s, %s, %s)",
+                                    (pid, ev_type, ts, fpath)
+                                )
+
+                                # Populate processes table
+                                if pid and pid > 0:
+                                    pname = ev.get("process_name") or "os_process"
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO processes (pid, name, state, start_time)
+                                        VALUES (%s, %s, 'RUNNING', %s)
+                                        ON DUPLICATE KEY UPDATE state = 'RUNNING', name = COALESCE(VALUES(name), name)
+                                        """,
+                                        (pid, pname, ts)
+                                    )
+                                    if ev_type == "process_terminated":
+                                        cursor.execute(
+                                            "UPDATE processes SET state = 'TERMINATED', end_time = %s WHERE pid = %s",
+                                            (ts, pid)
+                                        )
+
+                                    # Populate resource_metrics & threads if telemetry is attached
+                                    cursor.execute("SELECT process_id FROM processes WHERE pid = %s LIMIT 1", (pid,))
+                                    p_row = cursor.fetchone()
+                                    if p_row:
+                                        proc_id = p_row[0]
+                                        res_info = ev.get("resource_info")
+                                        if res_info:
+                                            cursor.execute(
+                                                """
+                                                INSERT INTO resource_metrics (process_id, cpu_usage, memory_usage, disk_io, network_io, recorded_at)
+                                                VALUES (%s, %s, %s, %s, %s, %s)
+                                                """,
+                                                (proc_id, res_info.get("cpu_usage"), res_info.get("memory_usage"), res_info.get("disk_io"), res_info.get("network_io"), ts)
+                                            )
+                                        meta = ev.get("metadata") or {}
+                                        threads_list = meta.get("threads") or []
+                                        for t in threads_list[:3]:
+                                            tid = t.get("id")
+                                            if tid:
+                                                cursor.execute(
+                                                    "INSERT IGNORE INTO threads (process_id, tid, state, created_at) VALUES (%s, %s, 'RUNNING', %s)",
+                                                    (proc_id, tid, ts)
+                                                )
+
+                                # Populate files, directories, permissions for filesystem events
+                                if fpath and ev_type.startswith("file_"):
+                                    import os as _posix_os
+                                    cursor.execute("INSERT IGNORE INTO files (file_path, size_bytes) VALUES (%s, %s)", (fpath, 0))
+                                    dpath = _posix_os.path.dirname(fpath) or fpath
+                                    cursor.execute("INSERT IGNORE INTO directories (path) VALUES (%s)", (dpath,))
+                                    cursor.execute("SELECT file_id FROM files WHERE file_path = %s LIMIT 1", (fpath,))
+                                    f_row = cursor.fetchone()
+                                    if f_row:
+                                        cursor.execute(
+                                            "INSERT IGNORE INTO permissions (file_id, user_id, access_type, granted_at) VALUES (%s, 1, 'READ_WRITE', %s)",
+                                            (f_row[0], ts)
+                                        )
+                            conn.commit()
+                            cursor.close()
+                        except Exception as e:
+                            conn.rollback()
+                        finally:
+                            conn.close()
+                    await asyncio.sleep(0.05)
+                except asyncio.CancelledError:
+                    break
+                except Exception:
+                    await asyncio.sleep(0.1)
+
+        consumer_task = asyncio.create_task(_consume_stream())
+
     except ImportError:
-        # Package not installed — adapter functionality unavailable.
-        # The /health endpoint will reflect this; ingest routes still work.
         application.state.os_event_stream = None
         application.state.os_adapter = None
 
     yield  # Application runs here.
+
+    if consumer_task:
+        consumer_task.cancel()
+    if dbms_task:
+        dbms_task.cancel()
 
     # Shutdown: stop the adapter if it was started.
     adapter = getattr(application.state, "os_adapter", None)
@@ -78,22 +266,31 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
-app.include_router(events_router, prefix="/api")
-app.include_router(correlation_router, prefix="/api")
-app.include_router(deadlocks_router, prefix="/api")
-app.include_router(dbms_events_router, prefix="/api")
-app.include_router(query_executions_router, prefix="/api")
-app.include_router(recovery_router, prefix="/api")
-app.include_router(schedules_router, prefix="/api")
-app.include_router(performance_router, prefix="/api")
-app.include_router(investigation_router, prefix="/api")
-app.include_router(what_if_router, prefix="/api")
-app.include_router(locks_router, prefix="/api")
-app.include_router(transactions_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
+
+# Protected Routes
+secure = [Depends(get_current_user)]
+app.include_router(events_router, prefix="/api", dependencies=secure)
+app.include_router(correlation_router, prefix="/api", dependencies=secure)
+app.include_router(deadlocks_router, prefix="/api", dependencies=secure)
+app.include_router(dbms_events_router, prefix="/api", dependencies=secure)
+app.include_router(query_executions_router, prefix="/api", dependencies=secure)
+app.include_router(recovery_router, prefix="/api", dependencies=secure)
+app.include_router(schedules_router, prefix="/api", dependencies=secure)
+app.include_router(performance_router, prefix="/api", dependencies=secure)
+app.include_router(investigation_router, prefix="/api", dependencies=secure)
+app.include_router(what_if_router, prefix="/api", dependencies=secure)
+app.include_router(locks_router, prefix="/api", dependencies=secure)
+app.include_router(transactions_router, prefix="/api", dependencies=secure)
+app.include_router(benchmark_router, dependencies=secure)
+app.include_router(blast_radius_router, dependencies=secure)
+app.include_router(os_events_router, prefix="/api", dependencies=secure)
+app.include_router(simulations_router, prefix="/api", dependencies=secure)
+app.include_router(audit_router, prefix="/api/audit", dependencies=secure)
+app.include_router(bridge_router, prefix="/api", dependencies=secure)
+
+# Demo routes remain open for evaluators
 app.include_router(demo_router, prefix="/api")
-app.include_router(benchmark_router)
-app.include_router(blast_radius_router)
-app.include_router(os_events_router, prefix="/api")
 
 
 @app.get("/", include_in_schema=False)

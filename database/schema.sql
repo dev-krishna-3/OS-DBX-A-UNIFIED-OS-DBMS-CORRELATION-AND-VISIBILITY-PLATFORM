@@ -5,8 +5,10 @@ CREATE TABLE users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) NOT NULL UNIQUE,
     uid_linux BIGINT NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
 
 
 # PROCESS TABLE CREATED BY "KRISHNA NITIN ANASANE"
@@ -373,6 +375,8 @@ CREATE TABLE incidents (
     trace_id INT,
     incident_type VARCHAR(100),
     description TEXT,
+    severity VARCHAR(20) DEFAULT 'MEDIUM',
+    evidence JSON,
     detected_at DATETIME,
     resolved BOOLEAN,
 
@@ -387,6 +391,7 @@ CREATE TABLE performance_records (
     trace_id INT,
     metric_name VARCHAR(100),
     metric_value FLOAT,
+    data_source VARCHAR(50) DEFAULT 'SIMULATION',
     recorded_at DATETIME,
 
     CONSTRAINT fk_performance_record_trace
@@ -437,3 +442,9 @@ CREATE TABLE what_if_scenarios (
     result_json LONGTEXT NOT NULL,
     created_at DATETIME NOT NULL
 );
+
+# PERFORMANCE OPTIMIZATION INDEXES
+CREATE INDEX idx_os_events_pid_ts ON os_events(pid, timestamp);
+CREATE INDEX idx_qe_type_text_ts ON query_executions(query_type, timestamp);
+CREATE INDEX idx_incidents_type_resolved ON incidents(incident_type, resolved);
+

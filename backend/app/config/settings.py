@@ -15,8 +15,13 @@ class Settings(BaseSettings):
     # the MySQL schema is available and OS events should be durable.
     event_storage: str = "memory"
     dbms_collection_interval_seconds: int = 5
+    os_watch_paths: list[str] = ["."]
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "backend/.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()
