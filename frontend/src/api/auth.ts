@@ -26,7 +26,7 @@ export interface RegisterRequest {
 }
 
 export const authApi = {
-  async signIn(email: string, password: string, remember = false): Promise<AuthResult> {
+  async signIn(email: string, password: string, remember = true): Promise<AuthResult> {
     const body = new URLSearchParams({ username: email, password });
     const result = await apiRequest<AuthResult>('/auth/token', {
       method: 'POST',

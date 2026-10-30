@@ -7,7 +7,7 @@ const accessTokenKey = 'osdbx_access_token';
 function readStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    return window.sessionStorage.getItem(accessTokenKey) ?? window.localStorage.getItem(accessTokenKey);
+    return window.localStorage.getItem(accessTokenKey) ?? window.sessionStorage.getItem(accessTokenKey);
   } catch {
     return null;
   }
@@ -16,16 +16,23 @@ function readStoredToken(): string | null {
 let accessToken: string | null = readStoredToken();
 
 export function hasAccessToken(): boolean {
-  return accessToken !== null;
+  return (accessToken ?? readStoredToken()) !== null;
 }
 
-export function setAccessToken(token: string | null, remember = false): void {
+export function getAccessToken(): string | null {
+  return accessToken ?? readStoredToken();
+}
+
+export function setAccessToken(token: string | null, _remember = true): void {
   accessToken = token;
   if (typeof window === 'undefined') return;
   try {
     window.sessionStorage.removeItem(accessTokenKey);
     window.localStorage.removeItem(accessTokenKey);
-    if (token) (remember ? window.localStorage : window.sessionStorage).setItem(accessTokenKey, token);
+    if (token) {
+      window.localStorage.setItem(accessTokenKey, token);
+      window.sessionStorage.setItem(accessTokenKey, token);
+    }
   } catch {
     // Keep the in-memory token usable when browser storage is unavailable.
   }
@@ -37,13 +44,20 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   const headers = new Headers(options.headers);
-  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+  const token = accessToken ?? readStoredToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
   const response = await fetch(`${apiBaseUrl}/api${path}`, { ...options, headers });
   if (!response.ok) {
+    if (response.status === 401) {
+      setAccessToken(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('osdbx:session-expired', { detail: { path } }));
+      }
+    }
     const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
     const detail = payload?.detail;
     const message = typeof detail === 'string'

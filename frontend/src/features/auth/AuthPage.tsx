@@ -26,7 +26,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -158,18 +158,18 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
               )}
 
               <label className="login-field" htmlFor="account-email">
-                <span>Email address</span>
+                <span>{isSignUp ? 'Email address' : 'Username or Email address'}</span>
                 <span className="login-input-wrap">
                   <Mail size={17} aria-hidden="true" />
                   <input
                     id="account-email"
                     required
-                    type="email"
+                    type={isSignUp ? 'email' : 'text'}
                     maxLength={254}
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    autoComplete="email"
-                    placeholder="you@example.com"
+                    autoComplete="username"
+                    placeholder={isSignUp ? 'you@example.com' : 'Username or email (e.g. abc or admin)'}
                   />
                 </span>
               </label>
@@ -211,6 +211,27 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                     />
                   </span>
                 </label>
+              )}
+
+              {!isSignUp && (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '-4px' }}>
+                  <button
+                    type="button"
+                    className="button button-quiet"
+                    style={{ fontSize: '11.5px', padding: '3px 8px', minHeight: '26px' }}
+                    onClick={() => { setEmail('abc'); setPassword('12345678'); }}
+                  >
+                    Quick preset: abc
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-quiet"
+                    style={{ fontSize: '11.5px', padding: '3px 8px', minHeight: '26px' }}
+                    onClick={() => { setEmail('admin'); setPassword('Admin@OSDBX2026!'); }}
+                  >
+                    Quick preset: admin
+                  </button>
+                </div>
               )}
 
               {!isSignUp && (

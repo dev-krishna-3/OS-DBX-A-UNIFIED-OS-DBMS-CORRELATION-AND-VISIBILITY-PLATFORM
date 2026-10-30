@@ -409,7 +409,11 @@ function App() {
   }, [refreshLiveWorkspace, notify]);
 
   useEffect(() => {
-    if (!hasAccessToken()) return;
+    if (!hasAccessToken()) {
+      setCurrentUser(null);
+      setAuthReady(true);
+      return;
+    }
     let active = true;
     void authApi.currentUser()
       .then((user) => {
@@ -418,10 +422,26 @@ function App() {
           void refreshLiveWorkspace(false, user.is_admin);
         }
       })
-      .catch(() => { authApi.signOut(); })
+      .catch(() => {
+        if (active) {
+          authApi.signOut();
+          setCurrentUser(null);
+        }
+      })
       .finally(() => { if (active) setAuthReady(true); });
     return () => { active = false; };
   }, [refreshLiveWorkspace]);
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      authApi.signOut();
+      setCurrentUser(null);
+      setAuthReady(true);
+      notify('Your session has expired. Please sign in again to continue.');
+    };
+    window.addEventListener('osdbx:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('osdbx:session-expired', handleSessionExpired);
+  }, [notify]);
 
   useEffect(() => {
     if (!currentUser || sampleMode) return;
