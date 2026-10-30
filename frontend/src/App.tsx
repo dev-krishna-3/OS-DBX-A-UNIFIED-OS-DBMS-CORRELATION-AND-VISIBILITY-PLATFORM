@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'framer-motion';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Check,
-  CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock3, Contrast, Cpu, Database, FileClock,
+  ChevronDown, ChevronRight, CircleHelp, Clock3, Contrast, Cpu, Database, FileClock,
   FlaskConical, GitBranch, HardDrive, LayoutDashboard, ListFilter, LockKeyhole,
   MemoryStick, Monitor, Moon, Network, Palette, Play, RefreshCw, Search, Settings, ShieldAlert, Sparkles,
   Sun, Waypoints, X,
@@ -57,37 +57,15 @@ const headings: Record<string, string> = {
   'Accounts & sign-in': 'Accounts & sign-in',
 };
 
-export type AppearanceTone = 'light' | 'dark' | 'blue';
+type ThemeId = 'original' | 'orchid' | 'cobalt' | 'coral';
+type ToneId = 'light' | 'dark' | 'blue';
 
-export interface AppearanceOption {
-  id: AppearanceTone;
-  name: string;
-  note: string;
-  colors: string[];
-}
-
-const appearanceOptions: AppearanceOption[] = [
-  {
-    id: 'light',
-    name: 'Light tone',
-    note: 'Clean daytime forensic workstation · Default paper',
-    colors: ['#f5f4fa', '#eeecf5', '#7665bd', '#302d42'],
-  },
-  {
-    id: 'dark',
-    name: 'Dark tone',
-    note: 'Deep dark cyber-forensic mode · Low light investigations',
-    colors: ['#11141c', '#181d28', '#8b7ef8', '#e6edf3'],
-  },
-  {
-    id: 'blue',
-    name: 'Blue tone',
-    note: 'Signature midnight cobalt mode · Systems observability',
-    colors: ['#09121f', '#0f1c30', '#3b82f6', '#e3effd'],
-  },
+const themeOptions: { id: ThemeId; name: string; note: string; colors: string[] }[] = [
+  { id: 'original', name: 'Lavender', note: 'Soft and calm · Default', colors: ['#f5f4fa', '#eeecf5', '#7665bd', '#dff1e9'] },
+  { id: 'orchid', name: 'Violet', note: 'A little richer', colors: ['#e8e3f1', '#d9cfe8', '#7056b3', '#b9cbea'] },
+  { id: 'cobalt', name: 'Blue', note: 'Cool and clear', colors: ['#dce6ee', '#c8d8e6', '#2f6298', '#edaa71'] },
+  { id: 'coral', name: 'Coral', note: 'Warm with a hint of teal', colors: ['#e8e2dc', '#e9d1c8', '#bb5746', '#c5d9d1'] },
 ];
-
-const APPEARANCE_STORAGE_KEY = 'osdbx_appearance_tone';
 
 interface SystemHealthPayload {
   timestamp?: string;
@@ -287,19 +265,8 @@ function App() {
   const [guidedStep, setGuidedStep] = useState(-1);
   const [sampleMode, setSampleMode] = useState(false);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState('Round Robin');
-  const [appearanceTone, setAppearanceTone] = useState<AppearanceTone>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(APPEARANCE_STORAGE_KEY) as AppearanceTone;
-        if (saved === 'light' || saved === 'dark' || saved === 'blue') {
-          return saved;
-        }
-      } catch (e) {
-        console.warn('Could not read saved appearance tone', e);
-      }
-    }
-    return 'light';
-  });
+  const [theme, setTheme] = useState<ThemeId>('original');
+  const [tone, setTone] = useState<ToneId>('light');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [searchPaletteOpen, setSearchPaletteOpen] = useState(false);
@@ -330,30 +297,19 @@ function App() {
     window.setTimeout(() => setNotice(''), 3400);
   }, []);
 
-  const handleToneChange = useCallback((tone: AppearanceTone) => {
-    setAppearanceTone(tone);
-    try {
-      localStorage.setItem(APPEARANCE_STORAGE_KEY, tone);
-    } catch (err) {
-      console.warn('Unable to persist appearance tone preference:', err);
-    }
-    const labelMap: Record<AppearanceTone, string> = {
-      light: 'Light tone',
-      dark: 'Dark tone',
-      blue: 'Blue tone',
-    };
-    notify(`Appearance switched to ${labelMap[tone]}. Preference saved permanently.`);
-  }, [notify]);
-
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchPaletteOpen((prev) => !prev);
+        setNotificationsOpen(false);
+        setPaletteOpen(false);
+        setSyncDropdownOpen(false);
       }
       if (e.key === 'Escape') {
         setSearchPaletteOpen(false);
         setNotificationsOpen(false);
+        setPaletteOpen(false);
         setSyncDropdownOpen(false);
       }
     };
@@ -489,6 +445,10 @@ function App() {
     setSection(id);
     setActiveTab(tabs[id][0]);
     setSearch('');
+    setNotificationsOpen(false);
+    setPaletteOpen(false);
+    setSearchPaletteOpen(false);
+    setSyncDropdownOpen(false);
   };
 
   if (!authReady) return <main className="auth-session-loading"><span className="brand-mark" aria-hidden="true"><span /><span /><span /></span><p>Restoring your OS-DBX session…</p></main>;
@@ -504,7 +464,7 @@ function App() {
 
   return (
     <LazyMotion features={domAnimation}>
-    <div className="app-shell" data-theme={appearanceTone}>
+    <div className="app-shell" data-theme={theme} data-tone={tone}>
       <a className="skip-link" href="#main-content">Skip to content</a>
       <div className="workspace">
         <header className="app-header">
@@ -523,14 +483,34 @@ function App() {
                 <input
                   aria-label="Search telemetry"
                   value={search}
-                  onFocus={() => setSearchPaletteOpen(true)}
+                  onFocus={() => {
+                    setSearchPaletteOpen(true);
+                    setNotificationsOpen(false);
+                    setPaletteOpen(false);
+                    setSyncDropdownOpen(false);
+                  }}
                   onChange={(event) => {
                     setSearch(event.target.value);
-                    if (!searchPaletteOpen) setSearchPaletteOpen(true);
+                    if (!searchPaletteOpen) {
+                      setSearchPaletteOpen(true);
+                      setNotificationsOpen(false);
+                      setPaletteOpen(false);
+                      setSyncDropdownOpen(false);
+                    }
                   }}
                   placeholder="Search telemetry…"
                 />
-                <kbd onClick={() => setSearchPaletteOpen((v) => !v)} style={{ cursor: 'pointer' }}>⌘ K</kbd>
+                <kbd
+                  onClick={() => {
+                    setSearchPaletteOpen((v) => !v);
+                    setNotificationsOpen(false);
+                    setPaletteOpen(false);
+                    setSyncDropdownOpen(false);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  ⌘ K
+                </kbd>
               </label>
               {searchPaletteOpen && (
                 <div className="search-palette" role="dialog" aria-label="Command search palette">
@@ -572,36 +552,36 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="appearance-toggle-group" role="group" aria-label="Workspace appearance tone">
+            <div className="tone-toggle-group" role="group" aria-label="Workspace tone">
               <button
                 type="button"
-                className={`appearance-btn ${appearanceTone === 'light' ? 'active' : ''}`}
-                onClick={() => handleToneChange('light')}
-                aria-pressed={appearanceTone === 'light'}
-                title="Light tone: Clean daytime forensic workspace"
+                className={`tone-btn ${tone === 'light' ? 'active' : ''}`}
+                onClick={() => setTone('light')}
+                aria-pressed={tone === 'light'}
+                title="Light tone"
               >
                 <Sun size={13} />
-                <span>Light tone</span>
+                <span>Light</span>
               </button>
               <button
                 type="button"
-                className={`appearance-btn ${appearanceTone === 'dark' ? 'active' : ''}`}
-                onClick={() => handleToneChange('dark')}
-                aria-pressed={appearanceTone === 'dark'}
-                title="Dark tone: Deep dark cyber-forensic mode"
+                className={`tone-btn ${tone === 'dark' ? 'active' : ''}`}
+                onClick={() => setTone('dark')}
+                aria-pressed={tone === 'dark'}
+                title="Dark tone"
               >
                 <Moon size={13} />
-                <span>Dark tone</span>
+                <span>Dark</span>
               </button>
               <button
                 type="button"
-                className={`appearance-btn ${appearanceTone === 'blue' ? 'active' : ''}`}
-                onClick={() => handleToneChange('blue')}
-                aria-pressed={appearanceTone === 'blue'}
-                title="Blue tone: Signature midnight cobalt systems observability"
+                className={`tone-btn ${tone === 'blue' ? 'active' : ''}`}
+                onClick={() => setTone('blue')}
+                aria-pressed={tone === 'blue'}
+                title="Blue tone"
               >
                 <Contrast size={13} />
-                <span>Blue tone</span>
+                <span>Blue</span>
               </button>
             </div>
             <button type="button" className="icon-button header-utility" aria-label="Help" onClick={() => notify('Cross-layer causal observability active.')}><CircleHelp size={18} /></button>
@@ -611,7 +591,12 @@ function App() {
                 className={`icon-button header-utility ${notificationsOpen ? 'active' : ''}`}
                 aria-label="Notifications"
                 aria-expanded={notificationsOpen}
-                onClick={() => setNotificationsOpen((v) => !v)}
+                onClick={() => {
+                  setNotificationsOpen((v) => !v);
+                  setPaletteOpen(false);
+                  setSearchPaletteOpen(false);
+                  setSyncDropdownOpen(false);
+                }}
               >
                 <Bell size={18} />
                 {(liveData.incidents.length > 0 || liveData.auditLogs.length > 0) && <span className="notifications-badge" />}
@@ -672,37 +657,49 @@ function App() {
                 <Icon size={16} strokeWidth={1.8} /><span>{item.label}</span>{item.id === 'incidents' && <span className="nav-count">{incidentCount}</span>}
               </button>;
             })}
-            <button type="button" className={`primary-nav-item theme-nav-toggle ${paletteOpen ? 'active' : ''}`} aria-expanded={paletteOpen} aria-controls="theme-preview-panel" onClick={() => setPaletteOpen((open) => !open)}><Palette size={16} /><span>Appearance</span></button>
+            <button
+              type="button"
+              className={`primary-nav-item theme-nav-toggle ${paletteOpen ? 'active' : ''}`}
+              aria-expanded={paletteOpen}
+              aria-controls="theme-preview-panel"
+              onClick={() => {
+                setPaletteOpen((open) => !open);
+                setNotificationsOpen(false);
+                setSearchPaletteOpen(false);
+                setSyncDropdownOpen(false);
+              }}
+            >
+              <Palette size={16} />
+              <span>Theme preview</span>
+            </button>
           </nav>
           <AnimatePresence initial={false}>
-          {paletteOpen && <m.section className="theme-preview-panel" id="theme-preview-panel" aria-label="Workspace appearance options"
+          {paletteOpen && <m.section className="theme-preview-panel" id="theme-preview-panel" aria-label="Temporary theme preview"
             initial={prefersReducedMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
             transition={{ duration: prefersReducedMotion ? 0 : 0.16, ease: 'easeOut' }}>
-            <div className="theme-preview-heading">
-              <div>
-                <h2>Workspace Appearance</h2>
-                <p>Choose your forensic workspace tone. Your selection is automatically saved and will not change on reload.</p>
-              </div>
-              <button type="button" className="icon-button" aria-label="Close appearance panel" onClick={() => setPaletteOpen(false)}><X size={17} /></button>
-            </div>
-            <div className="appearance-persistence-badge">
-              <CheckCircle2 size={14} color="var(--color-positive-ink)" />
-              <span>Appearance preference is stored locally and will not change on reload.</span>
-            </div>
-            <div className="theme-preview-options" role="group" aria-label="Appearance options">
-              {appearanceOptions.map((option) => <button type="button" key={option.id} className={`theme-option ${appearanceTone === option.id ? 'selected' : ''}`} aria-pressed={appearanceTone === option.id} onClick={() => handleToneChange(option.id)}>
+            <div className="theme-preview-heading"><div><h2>Pick a theme</h2><p>Choose a look for your workspace. Preview resets on reload.</p></div><button type="button" className="icon-button" aria-label="Close theme preview" onClick={() => setPaletteOpen(false)}><X size={17} /></button></div>
+            <div className="theme-preview-options" role="group" aria-label="Theme options">
+              {themeOptions.map((option) => <button type="button" key={option.id} className={`theme-option ${theme === option.id ? 'selected' : ''}`} aria-pressed={theme === option.id} onClick={() => setTheme(option.id)}>
                 <span className="theme-swatches" aria-hidden="true">{option.colors.map((color) => <i key={color} style={{ backgroundColor: color }} />)}</span>
                 <span className="theme-option-copy"><strong>{option.name}</strong><small>{option.note}</small></span>
-                {appearanceTone === option.id && <Check size={16} className="theme-option-check" />}
+                {theme === option.id && <Check size={16} className="theme-option-check" />}
               </button>)}
             </div>
           </m.section>}
           </AnimatePresence>
         </header>
 
-        <main id="main-content" className="main-content">
+        <main
+          id="main-content"
+          className="main-content"
+          onClick={() => {
+            if (notificationsOpen) setNotificationsOpen(false);
+            if (paletteOpen) setPaletteOpen(false);
+            if (searchPaletteOpen) setSearchPaletteOpen(false);
+          }}
+        >
           <div className="page-heading">
             <div><h1>{title}</h1><p>{pageMeta[section].subtitle}</p></div>
             <div className="heading-actions">
