@@ -20,6 +20,29 @@ from app.services.email_service import send_signin_notification, send_signup_not
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+import time
+
+_login_failed_attempts: dict[str, list[float]] = {}
+
+def check_login_rate_limit(key: str, max_attempts: int = 15, window_seconds: int = 60) -> None:
+    now = time.time()
+    attempts = _login_failed_attempts.get(key, [])
+    recent = [t for t in attempts if now - t < window_seconds]
+    _login_failed_attempts[key] = recent
+    if len(recent) >= max_attempts:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please wait 60 seconds before trying again.",
+        )
+
+def record_failed_attempt(key: str) -> None:
+    now = time.time()
+    _login_failed_attempts.setdefault(key, []).append(now)
+
+def clear_failed_attempts(key: str) -> None:
+    _login_failed_attempts.pop(key, None)
+
+
 def get_dbms_connection():
     connection = get_connection()
     try:
@@ -100,8 +123,10 @@ def login_access_token(
     connection: mysql.connector.MySQLConnection = Depends(get_dbms_connection)
 ) -> Any:
     """OAuth2 compatible token login, get an access token for future requests."""
+    check_login_rate_limit(form_data.username)
     user = get_user_by_username(connection, username=form_data.username)
     if not user or not verify_password(form_data.password, user.password_hash):
+        record_failed_attempt(form_data.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username/email or password",
@@ -112,6 +137,7 @@ def login_access_token(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
+    clear_failed_attempts(form_data.username)
     recipient_email = user.email or (form_data.username if "@" in form_data.username else None)
     email_sent = send_signin_notification(recipient_email, user.username)
     return {

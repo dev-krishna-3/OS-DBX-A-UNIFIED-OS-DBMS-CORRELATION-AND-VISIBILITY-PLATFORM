@@ -400,7 +400,24 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title=settings.app_name, lifespan=lifespan)
+is_production = settings.environment.lower() in ("production", "prod")
+app = FastAPI(
+    title=settings.app_name,
+    lifespan=lifespan,
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
+    openapi_url=None if is_production else "/openapi.json",
+)
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    return response
 
 app.add_middleware(
     CORSMiddleware,

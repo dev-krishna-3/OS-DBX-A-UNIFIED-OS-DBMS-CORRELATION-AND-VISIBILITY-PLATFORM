@@ -24,6 +24,7 @@ def get_benchmark_service(connection=Depends(get_connection)):
 
 @router.get("/api/v1/benchmarks/scenarios", response_model=list[str])
 @router.get("/api/benchmark/scenarios", response_model=list[str], include_in_schema=False)
+@router.get("/api/benchmarks/scenarios", response_model=list[str], include_in_schema=False)
 async def get_scenarios() -> list[str]:
     """List available deterministic benchmark scenarios."""
     return [scenario.value for scenario in BenchmarkScenarioType]
@@ -31,6 +32,7 @@ async def get_scenarios() -> list[str]:
 
 @router.post("/api/v1/benchmarks/run", response_model=BenchmarkResult)
 @router.post("/api/benchmark/run", response_model=BenchmarkResult, include_in_schema=False)
+@router.post("/api/benchmarks/run", response_model=BenchmarkResult, include_in_schema=False)
 async def run_benchmark(config: BenchmarkConfig, service: BenchmarkRunnerService = Depends(get_benchmark_service)) -> BenchmarkResult:
     """Execute a deterministic benchmark scenario and return measurements."""
     return service.run_benchmark(config)

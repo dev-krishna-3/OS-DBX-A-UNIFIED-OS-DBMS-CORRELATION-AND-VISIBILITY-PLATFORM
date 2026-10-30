@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 
 import threading
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Query, Depends
+from app.api.routes_events import get_event_service
+from app.services.event_service import EventService
 
 from app.models.events import (
     OSEvent,
@@ -41,6 +43,15 @@ _next_process_id = 1
 _next_filesystem_id = 1
 _store_lock = threading.Lock()
 
+
+
+@router.get("", response_model=list[StoredOSEvent])
+def list_os_events(
+    limit: int = Query(default=100, ge=1, le=500),
+    service: EventService = Depends(get_event_service),
+) -> list[StoredOSEvent]:
+    """Return recently stored OS events (alias to /api/events for API consistency)."""
+    return service.get_events(limit=limit)
 
 @router.post("", response_model=StoredOSEvent, status_code=201)
 def ingest_process_event(event: OSEvent) -> StoredOSEvent:

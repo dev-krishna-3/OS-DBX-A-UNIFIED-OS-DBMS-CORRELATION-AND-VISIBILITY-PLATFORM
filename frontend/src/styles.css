@@ -2373,3 +2373,37 @@ button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, 
     transform: scale(0.92);
   }
 }
+
+
+/* 8. Absolute Contrast Guarantee: All Headlines & Text in Dark & Blue Tones */
+.app-shell[data-tone="dark"] h1,
+.app-shell[data-tone="dark"] h2,
+.app-shell[data-tone="dark"] h3,
+.app-shell[data-tone="dark"] h4,
+.app-shell[data-tone="dark"] .feature-copy h2,
+.app-shell[data-tone="dark"] .page-heading h1,
+.app-shell[data-tone="dark"] .panel-heading h3,
+.app-shell[data-tone="dark"] .trace-hero h2,
+.app-shell[data-tone="dark"] .section-heading,
+.app-shell[data-tone="dark"] .output-heading h4,
+.app-shell[data-tone="blue"] h1,
+.app-shell[data-tone="blue"] h2,
+.app-shell[data-tone="blue"] h3,
+.app-shell[data-tone="blue"] h4,
+.app-shell[data-tone="blue"] .feature-copy h2,
+.app-shell[data-tone="blue"] .page-heading h1,
+.app-shell[data-tone="blue"] .panel-heading h3,
+.app-shell[data-tone="blue"] .trace-hero h2,
+.app-shell[data-tone="blue"] .section-heading,
+.app-shell[data-tone="blue"] .output-heading h4 {
+  color: var(--color-ink) !important;
+}
+
+.app-shell[data-tone="dark"] .feature-copy > p,
+.app-shell[data-tone="dark"] .page-heading p,
+.app-shell[data-tone="dark"] .panel-heading p,
+.app-shell[data-tone="blue"] .feature-copy > p,
+.app-shell[data-tone="blue"] .page-heading p,
+.app-shell[data-tone="blue"] .panel-heading p {
+  color: var(--color-ink-2) !important;
+}

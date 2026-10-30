@@ -518,3 +518,44 @@ def list_simulation_history(limit: int = 25) -> Dict[str, Any]:
         pass
     return history
 
+
+@router.get("/scenarios")
+def list_simulation_scenarios() -> list[dict[str, Any]]:
+    """Return catalog of available simulation engines and supported algorithms."""
+    return [
+        {
+            "id": "cpu_scheduling",
+            "name": "CPU Scheduling Algorithms",
+            "algorithms": ["fcfs", "sjf", "srtf", "round_robin", "priority"],
+            "endpoint": "/api/simulations/scheduling",
+        },
+        {
+            "id": "page_replacement",
+            "name": "Memory Page Replacement",
+            "algorithms": ["fifo", "lru", "optimal"],
+            "endpoint": "/api/simulations/memory",
+        },
+        {
+            "id": "bankers_algorithm",
+            "name": "Banker's Deadlock Avoidance",
+            "endpoint": "/api/simulations/deadlock/bankers",
+        },
+        {
+            "id": "resource_allocation_graph",
+            "name": "Resource Allocation Graph (RAG) Deadlock Detection",
+            "endpoint": "/api/simulations/deadlock/rag",
+        },
+        {
+            "id": "disk_scheduling",
+            "name": "Disk Head Scheduling",
+            "algorithms": ["fcfs", "sstf", "scan", "cscan", "look", "clook"],
+            "endpoint": "/api/simulations/disk",
+        },
+        {
+            "id": "classical_ipc",
+            "name": "Classical Synchronization Problems",
+            "problems": ["producer_consumer", "dining_philosophers", "readers_writers"],
+            "endpoint": "/api/simulations/sync",
+        },
+    ]
+

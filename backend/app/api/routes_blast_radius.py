@@ -29,6 +29,8 @@ def get_blast_radius_service(connection=Depends(get_connection)):
 
 
 @router.get("/{incident_id}/blast-radius", response_model=BlastRadiusResult)
+@router.get("/api/incidents/{incident_id}/blast-radius", response_model=BlastRadiusResult, include_in_schema=False)
+@router.get("/api/v1/incidents/{incident_id}/blast-radius", response_model=BlastRadiusResult, include_in_schema=False)
 async def get_blast_radius(
     incident_id: int = Path(..., description="The ID of the incident to analyze"),
     service: BlastRadiusService = Depends(get_blast_radius_service)
