@@ -1825,3 +1825,171 @@ button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, 
   justify-content: center;
   gap: 12px;
 }
+
+/* ==========================================================================
+   PREMIUM GLASSMORPHISM SYSTEM (Light, Dark & Blue Tones + All 4 Themes)
+   ========================================================================== */
+
+.app-shell,
+.app-shell[data-tone="light"] {
+  --glass-bg: color-mix(in srgb, var(--color-paper-3) 76%, transparent);
+  --glass-bg-elevated: color-mix(in srgb, var(--color-paper-3) 86%, transparent);
+  --glass-bg-popover: color-mix(in srgb, var(--color-paper-3) 96%, #ffffff);
+  --glass-border: color-mix(in srgb, #ffffff 74%, var(--color-rule));
+  --glass-highlight: rgba(255, 255, 255, 0.88);
+  --glass-shadow: 0 14px 36px rgba(45, 38, 78, 0.065), 0 2px 6px rgba(45, 38, 78, 0.03);
+  background-color: var(--color-paper);
+  background-image:
+    radial-gradient(ellipse 65% 50% at 14% 8%, color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 88% 16%, color-mix(in srgb, var(--color-os) 55%, transparent), transparent 72%),
+    radial-gradient(ellipse 60% 55% at 76% 88%, color-mix(in srgb, var(--color-dbms) 50%, transparent), transparent 75%);
+  background-attachment: fixed;
+}
+
+.app-shell[data-tone="dark"] {
+  --glass-bg: color-mix(in srgb, var(--color-paper-3) 74%, transparent);
+  --glass-bg-elevated: color-mix(in srgb, var(--color-paper-3) 84%, transparent);
+  --glass-bg-popover: color-mix(in srgb, var(--color-paper-3) 96%, #0b0e15);
+  --glass-border: rgba(255, 255, 255, 0.11);
+  --glass-highlight: rgba(255, 255, 255, 0.09);
+  --glass-shadow: 0 16px 40px rgba(0, 0, 0, 0.46), 0 2px 8px rgba(0, 0, 0, 0.3);
+  background-color: var(--color-paper);
+  background-image:
+    radial-gradient(ellipse 65% 50% at 15% 10%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 85% 18%, rgba(46, 160, 115, 0.11), transparent 72%),
+    radial-gradient(ellipse 60% 55% at 75% 88%, rgba(56, 139, 253, 0.11), transparent 75%);
+  background-attachment: fixed;
+}
+
+.app-shell[data-tone="blue"] {
+  --glass-bg: rgba(22, 38, 64, 0.72);
+  --glass-bg-elevated: rgba(26, 46, 78, 0.84);
+  --glass-bg-popover: rgba(16, 29, 51, 0.96);
+  --glass-border: rgba(96, 165, 250, 0.22);
+  --glass-highlight: rgba(147, 197, 253, 0.15);
+  --glass-shadow: 0 16px 40px rgba(3, 8, 20, 0.56), 0 2px 8px rgba(3, 8, 20, 0.36);
+  background-color: var(--color-paper);
+  background-image:
+    radial-gradient(ellipse 65% 50% at 16% 10%, rgba(59, 130, 246, 0.2), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 86% 16%, rgba(16, 185, 129, 0.12), transparent 72%),
+    radial-gradient(ellipse 60% 55% at 78% 88%, rgba(37, 99, 235, 0.18), transparent 75%);
+  background-attachment: fixed;
+}
+
+/* Frosted Sticky Header — keep .topbar without backdrop-filter so z-index:40 popovers never clip */
+.app-shell .app-header {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--glass-border) !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.045), inset 0 1px 0 var(--glass-highlight);
+}
+
+.app-shell .topbar {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Frosted Glass Surface Panels, Metric Blocks, Inline Strips & Callouts */
+.app-shell .surface-panel,
+.app-shell .summary-row,
+.app-shell .stat-inline,
+.app-shell .console-callout,
+.app-shell .guided-strip,
+.app-shell .resource-strip > div,
+.app-shell .evidence-card {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(16px) saturate(165%);
+  -webkit-backdrop-filter: blur(16px) saturate(165%);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+
+.app-shell .surface-panel {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+/* Hero Banner & 3D Correlation Stage Glassmorphism */
+.app-shell .trace-hero {
+  backdrop-filter: blur(18px) saturate(170%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+
+.app-shell .trace-stage {
+  background: var(--glass-bg-elevated) !important;
+  backdrop-filter: blur(16px) saturate(170%);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+
+.app-shell .diagram-slab {
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.14), inset 0 1px 0 var(--glass-highlight);
+}
+
+/* Topbar Interactive Glass Pills & Controls */
+.app-shell .search-box,
+.app-shell .tone-toggle-group,
+.app-shell .profile-mini,
+.app-shell .topbar-env,
+.app-shell .theme-nav-toggle,
+.app-shell .button-secondary {
+  background: var(--glass-bg-elevated) !important;
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+.app-shell .tone-btn.active {
+  background: var(--color-accent) !important;
+  color: var(--color-accent-ink) !important;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-accent) 35%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.app-shell .primary-nav-item.active {
+  background: color-mix(in srgb, var(--color-accent) 15%, var(--glass-bg-elevated));
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+/* High-Density Frosted Crystal Popovers (Zero Background Text Bleed) */
+.app-shell .notifications-popover,
+.app-shell .search-palette,
+.app-shell .theme-preview-panel,
+.app-shell .sync-telemetry-dropdown {
+  background: var(--glass-bg-popover) !important;
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.26), inset 0 1px 0 var(--glass-highlight) !important;
+}
+
+.app-shell .theme-option {
+  background: var(--glass-bg-elevated) !important;
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+.app-shell .theme-option.selected {
+  border-color: var(--color-accent) !important;
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--glass-bg-elevated)) !important;
+}
+
+/* Split-Screen Auth Entry Glass Polish */
+.login-card {
+  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  box-shadow: 0 28px 76px rgba(45, 38, 78, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.login-map-node {
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
