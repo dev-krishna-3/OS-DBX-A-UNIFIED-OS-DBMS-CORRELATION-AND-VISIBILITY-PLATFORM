@@ -1993,3 +1993,237 @@ button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, 
   -webkit-backdrop-filter: blur(12px) saturate(160%);
 }
 
+/* ==========================================================================
+   DARK & BLUE TONE HIGH-CONTRAST FIXES (Pills, Badges, Icons, Rows & Legacy Tokens)
+   ========================================================================== */
+
+/* 1. Fix 5-column .event-row grid so status dot, title, and Observed/Linked/Review badge stay on 1 row */
+.app-shell .event-row {
+  display: grid;
+  grid-template-columns: 96px 108px 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+}
+
+@media (max-width: 640px) {
+  .app-shell .event-row {
+    grid-template-columns: 82px 92px 8px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+}
+
+/* 2. Remap remaining light-mode --color-legacy-* tokens in Dark & Blue tones so nothing stays white/pastel */
+.app-shell[data-tone="dark"],
+.app-shell[data-tone="blue"] {
+  /* Primary ink tokens */
+  --color-legacy-023: var(--color-ink); --color-legacy-027: var(--color-ink); --color-legacy-039: var(--color-ink);
+  --color-legacy-046: var(--color-ink); --color-legacy-053: var(--color-ink); --color-legacy-066: var(--color-ink);
+  --color-legacy-071: var(--color-ink); --color-legacy-083: var(--color-ink); --color-legacy-091: var(--color-ink);
+  --color-legacy-118: var(--color-ink); --color-legacy-132: var(--color-ink); --color-legacy-139: var(--color-ink);
+  --color-legacy-170: var(--color-ink); --color-legacy-187: var(--color-ink); --color-legacy-196: var(--color-ink);
+  --color-legacy-211: var(--color-ink); --color-legacy-219: var(--color-ink); --color-legacy-223: var(--color-ink);
+  --color-legacy-224: var(--color-ink); --color-legacy-233: var(--color-ink); --color-legacy-241: var(--color-ink);
+  --color-legacy-244: var(--color-ink); --color-legacy-258: var(--color-ink); --color-legacy-262: var(--color-ink);
+  --color-legacy-265: var(--color-ink); --color-legacy-270: var(--color-ink); --color-legacy-282: var(--color-ink);
+  --color-legacy-286: var(--color-ink); --color-legacy-289: var(--color-ink); --color-legacy-293: var(--color-ink);
+  --color-legacy-300: var(--color-ink); --color-legacy-309: var(--color-ink); --color-legacy-326: var(--color-ink);
+  --color-legacy-340: var(--color-ink); --color-legacy-342: var(--color-ink); --color-legacy-368: var(--color-ink);
+  --color-legacy-370: var(--color-ink);
+
+  /* Secondary ink tokens */
+  --color-legacy-004: var(--color-ink-2); --color-legacy-028: var(--color-ink-2); --color-legacy-040: var(--color-ink-2);
+  --color-legacy-041: var(--color-ink-2); --color-legacy-042: var(--color-ink-2); --color-legacy-044: var(--color-ink-2);
+  --color-legacy-054: var(--color-ink-2); --color-legacy-067: var(--color-ink-2); --color-legacy-070: var(--color-ink-2);
+  --color-legacy-073: var(--color-ink-2); --color-legacy-074: var(--color-ink-2); --color-legacy-076: var(--color-ink-2);
+  --color-legacy-078: var(--color-ink-2); --color-legacy-084: var(--color-ink-2); --color-legacy-109: var(--color-ink-2);
+  --color-legacy-112: var(--color-ink-2); --color-legacy-115: var(--color-ink-2); --color-legacy-120: var(--color-ink-2);
+  --color-legacy-121: var(--color-ink-2); --color-legacy-122: var(--color-ink-2); --color-legacy-133: var(--color-ink-2);
+  --color-legacy-140: var(--color-ink-2); --color-legacy-171: var(--color-ink-2); --color-legacy-177: var(--color-ink-2);
+  --color-legacy-197: var(--color-ink-2); --color-legacy-202: var(--color-ink-2); --color-legacy-205: var(--color-ink-2);
+  --color-legacy-206: var(--color-ink-2); --color-legacy-207: var(--color-ink-2); --color-legacy-208: var(--color-ink-2);
+  --color-legacy-210: var(--color-ink-2); --color-legacy-217: var(--color-ink-2); --color-legacy-220: var(--color-ink-2);
+  --color-legacy-222: var(--color-ink-2); --color-legacy-226: var(--color-ink-2); --color-legacy-228: var(--color-ink-2);
+  --color-legacy-231: var(--color-ink-2); --color-legacy-234: var(--color-ink-2); --color-legacy-242: var(--color-ink-2);
+  --color-legacy-259: var(--color-ink-2); --color-legacy-264: var(--color-ink-2); --color-legacy-268: var(--color-ink-2);
+  --color-legacy-274: var(--color-ink-2); --color-legacy-275: var(--color-ink-2); --color-legacy-277: var(--color-ink-2);
+  --color-legacy-283: var(--color-ink-2); --color-legacy-284: var(--color-ink-2); --color-legacy-290: var(--color-ink-2);
+  --color-legacy-298: var(--color-ink-2); --color-legacy-302: var(--color-ink-2); --color-legacy-304: var(--color-ink-2);
+  --color-legacy-305: var(--color-ink-2); --color-legacy-312: var(--color-ink-2); --color-legacy-318: var(--color-ink-2);
+  --color-legacy-327: var(--color-ink-2); --color-legacy-335: var(--color-ink-2); --color-legacy-337: var(--color-ink-2);
+  --color-legacy-339: var(--color-ink-2); --color-legacy-343: var(--color-ink-2); --color-legacy-344: var(--color-ink-2);
+  --color-legacy-345: var(--color-ink-2); --color-legacy-353: var(--color-ink-2); --color-legacy-354: var(--color-ink-2);
+  --color-legacy-359: var(--color-ink-2); --color-legacy-360: var(--color-ink-2); --color-legacy-365: var(--color-ink-2);
+  --color-legacy-369: var(--color-ink-2); --color-legacy-374: var(--color-ink-2); --color-legacy-378: var(--color-ink-2);
+
+  /* Surface & paper tokens */
+  --color-legacy-035: var(--color-paper-2); --color-legacy-038: var(--color-paper-3); --color-legacy-045: var(--color-paper-2);
+  --color-legacy-052: var(--color-paper-2); --color-legacy-069: var(--color-paper-2); --color-legacy-075: var(--color-paper-2);
+  --color-legacy-079: var(--color-paper-2); --color-legacy-080: var(--color-paper-2); --color-legacy-093: var(--color-paper-3);
+  --color-legacy-095: var(--color-paper-2); --color-legacy-134: var(--color-paper-2); --color-legacy-137: var(--color-paper-3);
+  --color-legacy-154: var(--color-paper-3); --color-legacy-155: var(--color-paper-2); --color-legacy-158: var(--color-paper-2);
+  --color-legacy-167: var(--color-paper-3); --color-legacy-216: var(--color-paper-2); --color-legacy-230: var(--color-paper-2);
+  --color-legacy-238: var(--color-paper-3); --color-legacy-252: var(--color-paper-2); --color-legacy-260: var(--color-paper-2);
+  --color-legacy-285: var(--color-paper-2); --color-legacy-299: var(--color-paper-2); --color-legacy-310: var(--color-paper-2);
+  --color-legacy-321: var(--color-paper-2); --color-legacy-357: var(--color-paper-2); --color-legacy-361: var(--color-rule);
+  --color-legacy-366: var(--color-paper-2); --color-legacy-371: var(--color-paper-2); --color-legacy-376: var(--color-paper-2);
+  --color-legacy-382: var(--color-paper-2);
+
+  /* Border & rule tokens */
+  --color-legacy-025: var(--color-rule); --color-legacy-026: var(--color-rule); --color-legacy-034: var(--color-rule);
+  --color-legacy-063: var(--color-rule); --color-legacy-068: var(--color-rule); --color-legacy-072: var(--color-rule);
+  --color-legacy-077: var(--color-rule); --color-legacy-082: var(--color-rule); --color-legacy-090: var(--color-rule);
+  --color-legacy-092: var(--color-rule); --color-legacy-096: var(--color-rule); --color-legacy-100: var(--color-rule);
+  --color-legacy-101: var(--color-rule); --color-legacy-113: var(--color-rule); --color-legacy-123: var(--color-rule);
+  --color-legacy-157: var(--color-rule); --color-legacy-166: var(--color-rule); --color-legacy-172: var(--color-rule);
+  --color-legacy-176: var(--color-rule); --color-legacy-192: var(--color-rule); --color-legacy-209: var(--color-rule);
+  --color-legacy-221: var(--color-rule); --color-legacy-229: var(--color-rule); --color-legacy-237: var(--color-rule);
+  --color-legacy-243: var(--color-rule); --color-legacy-245: var(--color-rule); --color-legacy-246: var(--color-rule);
+  --color-legacy-253: var(--color-rule); --color-legacy-292: var(--color-rule); --color-legacy-311: var(--color-rule);
+  --color-legacy-323: var(--color-rule); --color-legacy-324: var(--color-rule); --color-legacy-328: var(--color-rule);
+  --color-legacy-333: var(--color-rule); --color-legacy-336: var(--color-rule); --color-legacy-338: var(--color-rule);
+  --color-legacy-341: var(--color-rule); --color-legacy-346: var(--color-rule); --color-legacy-347: var(--color-rule);
+  --color-legacy-355: var(--color-rule); --color-legacy-375: var(--color-rule); --color-legacy-380: var(--color-rule);
+
+  /* Semantic badge & icon backgrounds */
+  --color-legacy-024: var(--color-identity); --color-legacy-037: var(--color-identity); --color-legacy-055: var(--color-identity);
+  --color-legacy-125: var(--color-identity); --color-legacy-128: var(--color-identity); --color-legacy-129: var(--color-identity);
+  --color-legacy-168: var(--color-identity); --color-legacy-182: var(--color-identity); --color-legacy-239: var(--color-identity);
+  --color-legacy-250: var(--color-identity); --color-legacy-256: var(--color-identity); --color-legacy-287: var(--color-identity);
+  --color-legacy-314: var(--color-identity); --color-legacy-325: var(--color-identity); --color-legacy-329: var(--color-identity);
+  --color-legacy-362: var(--color-identity);
+
+  --color-legacy-102: var(--color-os); --color-legacy-117: var(--color-os); --color-legacy-126: var(--color-os);
+  --color-legacy-127: var(--color-os); --color-legacy-142: var(--color-os); --color-legacy-143: var(--color-os);
+  --color-legacy-178: var(--color-os); --color-legacy-255: var(--color-os); --color-legacy-294: var(--color-os);
+  --color-legacy-295: var(--color-os); --color-legacy-363: var(--color-os);
+
+  --color-legacy-105: var(--color-dbms); --color-legacy-130: var(--color-dbms); --color-legacy-131: var(--color-dbms);
+  --color-legacy-180: var(--color-dbms); --color-legacy-213: var(--color-dbms); --color-legacy-257: var(--color-dbms);
+  --color-legacy-364: var(--color-dbms);
+
+  --color-legacy-050: var(--color-attention); --color-legacy-064: var(--color-identity); --color-legacy-107: var(--color-attention);
+  --color-legacy-145: var(--color-attention); --color-legacy-146: var(--color-attention); --color-legacy-174: var(--color-attention);
+  --color-legacy-190: var(--color-attention); --color-legacy-198: var(--color-attention); --color-legacy-200: var(--color-attention);
+  --color-legacy-203: var(--color-attention); --color-legacy-296: var(--color-attention); --color-legacy-297: var(--color-attention);
+}
+
+/* 3. Explicit High-Contrast Foreground + Background + Specular Border for ALL Badges, Pills & Icons */
+.app-shell .source-os,
+.app-shell .state-observed,
+.app-shell .tag-mint,
+.app-shell .metric-icon.mint,
+.app-shell .evidence-icon.mint,
+.app-shell .result-check,
+.app-shell .db-check {
+  background: var(--color-os) !important;
+  color: var(--color-positive-ink) !important;
+  border: 1px solid color-mix(in srgb, var(--color-positive-ink) 28%, transparent);
+}
+
+.app-shell .source-dbms,
+.app-shell .tag-blue,
+.app-shell .metric-icon.blue,
+.app-shell .evidence-icon.blue,
+.app-shell .query-kind {
+  background: var(--color-dbms) !important;
+  color: var(--color-dbms-ink) !important;
+  border: 1px solid color-mix(in srgb, var(--color-dbms-ink) 28%, transparent);
+}
+
+.app-shell .source-correlation,
+.app-shell .state-linked,
+.app-shell .tag-lavender,
+.app-shell .event-tag:not(.tag-mint):not(.tag-blue),
+.app-shell .metric-icon.lavender,
+.app-shell .evidence-icon.lavender,
+.app-shell .incident-icon.info,
+.app-shell .health-symbol,
+.app-shell .guided-icon,
+.app-shell .replay-play,
+.app-shell .rule-row > span,
+.app-shell .demo-pill {
+  background: var(--color-identity) !important;
+  color: var(--color-focus) !important;
+  border: 1px solid color-mix(in srgb, var(--color-focus) 28%, transparent);
+}
+
+.app-shell .state-review,
+.app-shell .severity-high,
+.app-shell .severity-review,
+.app-shell .panel-count,
+.app-shell .incident-icon.warn,
+.app-shell .metric-icon.peach,
+.app-shell .evidence-icon.peach,
+.app-shell .nav-count {
+  background: var(--color-attention) !important;
+  color: var(--color-warning-ink) !important;
+  border: 1px solid color-mix(in srgb, var(--color-warning-ink) 28%, transparent);
+}
+
+.app-shell .muted-chip,
+.app-shell .evidence-item em {
+  background: var(--color-paper-2) !important;
+  color: var(--color-ink-2) !important;
+  border: 1px solid var(--color-rule);
+}
+
+.app-shell .profile-avatar,
+.app-shell .workspace-avatar,
+.app-shell .account-avatar {
+  background: var(--color-identity) !important;
+  color: var(--color-focus) !important;
+  border: 1px solid color-mix(in srgb, var(--color-focus) 32%, transparent);
+}
+
+/* 4. Ensure Dark & Blue Tones Have Luminous, Ultra-Readable Semantic Badge Ink Colors */
+.app-shell[data-tone="dark"],
+.app-shell[data-tone="blue"] {
+  --color-positive-ink: #6ee7b7;
+  --color-dbms-ink: #93c5fd;
+  --color-warning-ink: #fdba74;
+}
+
+.app-shell[data-tone="dark"] .verdict-pass,
+.app-shell[data-tone="blue"] .verdict-pass {
+  background: rgba(20, 62, 44, 0.78) !important;
+  border-color: rgba(110, 231, 183, 0.32) !important;
+  color: #d1fae5 !important;
+}
+
+.app-shell[data-tone="dark"] .verdict-warn,
+.app-shell[data-tone="blue"] .verdict-warn {
+  background: rgba(74, 34, 26, 0.78) !important;
+  border-color: rgba(253, 186, 116, 0.32) !important;
+  color: #ffedd5 !important;
+}
+
+.app-shell[data-tone="dark"] .gantt-track i,
+.app-shell[data-tone="blue"] .gantt-track i {
+  color: var(--color-ink) !important;
+  border-color: var(--color-rule) !important;
+}
+
+.app-shell[data-tone="dark"] .lock-node.held,
+.app-shell[data-tone="blue"] .lock-node.held {
+  background: var(--color-os) !important;
+  border-color: color-mix(in srgb, var(--color-positive-ink) 35%, transparent) !important;
+  color: var(--color-positive-ink) !important;
+}
+
+.app-shell[data-tone="dark"] .lock-node.waiting,
+.app-shell[data-tone="blue"] .lock-node.waiting {
+  background: var(--color-attention) !important;
+  border-color: color-mix(in srgb, var(--color-warning-ink) 35%, transparent) !important;
+  color: var(--color-warning-ink) !important;
+}
+
+.app-shell[data-tone="dark"] .slab-icon,
+.app-shell[data-tone="blue"] .slab-icon,
+.app-shell[data-tone="dark"] .layer-symbol,
+.app-shell[data-tone="blue"] .layer-symbol {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: var(--color-ink) !important;
+}
+
+

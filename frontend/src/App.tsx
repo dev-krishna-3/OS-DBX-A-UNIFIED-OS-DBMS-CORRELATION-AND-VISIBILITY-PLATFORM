@@ -3100,7 +3100,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
           value={auditActionInput}
           onChange={(e) => setAuditActionInput(e.target.value)}
           placeholder="Audit action name"
-          style={{ minHeight: '34px', padding: '0 10px', border: '1px solid var(--color-legacy-096)', borderRadius: '6px', fontSize: '10px', minWidth: '240px' }}
+          style={{ minHeight: '38px', padding: '0 12px', border: '1px solid var(--color-rule)', borderRadius: '8px', background: 'var(--color-paper-2)', color: 'var(--color-ink)', fontSize: '13px', minWidth: '240px' }}
         />
         <button type="button" className="button button-primary" onClick={() => void handleEmitAudit()}><Play size={13} fill="currentColor" /> Record audit entry</button>
       </div>
