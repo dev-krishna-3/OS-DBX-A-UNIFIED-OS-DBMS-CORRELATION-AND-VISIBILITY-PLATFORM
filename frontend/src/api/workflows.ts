@@ -14,5 +14,10 @@ export const workflowsApi = {
   recover: <T>(payload: unknown) => postJson<T>('/recovery/recover', payload),
   createAuditEntry: <T>(payload: unknown) => postJson<T>('/audit/', payload),
   osCollectorStatus: <T>() => apiRequest<T>('/os-events/status'),
+  osCollectorMetrics: <T>() => apiRequest<T>('/os-events/metrics'),
+  startOsCollector: <T>() => apiRequest<T>('/os-events/start', { method: 'POST' }),
   filesystemEvents: <T>() => apiRequest<T[]>('/os-events/filesystem'),
+  filesystemDetectionTest: <T>() => apiRequest<T>('/console/filesystem-test', { method: 'POST' }),
+  runSqlCausality: <T>(query: string) => postJson<T>('/console/sql', { query }),
+  realWorldEvaluation: <T>() => apiRequest<T>('/console/real-world'),
 };

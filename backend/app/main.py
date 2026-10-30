@@ -37,6 +37,7 @@ from app.api.routes_os_events import router as os_events_router
 from app.api.routes_simulations import router as simulations_router
 from app.api.routes_audit import router as audit_router
 from app.api.routes_bridge import router as bridge_router
+from app.api.routes_console import router as console_router
 from app.config.settings import settings
 from app.core.auth import get_current_user
 
@@ -80,6 +81,16 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     from app.config.database import get_connection
 
     seed_admin_account()
+    try:
+        import threading as _threading
+        from app.api import routes_os_events as _os_routes
+
+        _threading.Thread(
+            target=lambda: (_os_routes.list_processes(), _os_routes.list_resource_metrics()),
+            daemon=True,
+        ).start()
+    except Exception:
+        pass
     consumer_task = None
     dbms_task = None
     
@@ -429,6 +440,7 @@ app.include_router(os_events_router, prefix="/api", dependencies=secure)
 app.include_router(simulations_router, prefix="/api", dependencies=secure)
 app.include_router(audit_router, prefix="/api/audit", dependencies=secure)
 app.include_router(bridge_router, prefix="/api", dependencies=secure)
+app.include_router(console_router, prefix="/api", dependencies=secure)
 
 # Demo routes remain open for evaluators
 app.include_router(demo_router, prefix="/api")

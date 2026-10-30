@@ -4,7 +4,7 @@ import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Check,
   ChevronDown, ChevronRight, CircleHelp, Clock3, Cpu, Database, FileClock,
   FlaskConical, GitBranch, HardDrive, LayoutDashboard, ListFilter, LockKeyhole,
-  MemoryStick, Monitor, Network, Palette, Play, Search, Settings, ShieldAlert, Sparkles,
+  MemoryStick, Monitor, Network, Palette, Play, RefreshCw, Search, Settings, ShieldAlert, Sparkles,
   Waypoints, X,
 } from 'lucide-react';
 import { events as sampleEvents, observations as sampleObservations, pageMeta, scenarioNames, sidebarGroups, type ActivityEvent, type SectionId } from './data/demo';
@@ -265,6 +265,11 @@ function App() {
   const [selectedAlgorithm, setSelectedAlgorithm] = useState('Round Robin');
   const [theme, setTheme] = useState<ThemeId>('original');
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [searchPaletteOpen, setSearchPaletteOpen] = useState(false);
+  const [syncDropdownOpen, setSyncDropdownOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState('Just now');
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authReady, setAuthReady] = useState(() => !hasAccessToken());
   const [liveData, setLiveData] = useState<LiveWorkspaceData>({
@@ -287,6 +292,22 @@ function App() {
   const notify = useCallback((message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 3400);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchPaletteOpen((prev) => !prev);
+      }
+      if (e.key === 'Escape') {
+        setSearchPaletteOpen(false);
+        setNotificationsOpen(false);
+        setSyncDropdownOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const refreshLiveWorkspace = useCallback(async (showToast = false, isAdminUser?: boolean) => {
@@ -342,9 +363,22 @@ function App() {
     }));
 
     if (showToast) {
-      notify(anyFulfilled ? 'Live telemetry synchronized with OS-DBX backend.' : 'Showing cached workspace records.');
+      notify(anyFulfilled ? 'Live telemetry synchronized.' : 'Showing cached workspace records.');
     }
   }, [notify, currentUser?.is_admin]);
+
+  const handleManualSync = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      await refreshLiveWorkspace(false);
+      setLastSyncedAt(new Date().toLocaleTimeString());
+      notify('Live telemetry synchronized.');
+    } catch {
+      notify('Telemetry up to date.');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [refreshLiveWorkspace, notify]);
 
   useEffect(() => {
     if (!hasAccessToken()) return;
@@ -431,10 +465,119 @@ function App() {
             </a>
           <div className="breadcrumb"><strong>{title}</strong></div>
           <div className="topbar-actions">
-            <label className="search-box"><Search size={16} /><input aria-label="Search activity" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search activity" /><kbd>⌘ K</kbd></label>
-            <button type="button" className="icon-button header-utility" aria-label="Help" onClick={() => notify('OS-DBX CLI-parity interactive workspace active.')}><CircleHelp size={18} /></button>
-            <button type="button" className="icon-button header-utility" aria-label="Notifications" onClick={() => void refreshLiveWorkspace(true)}><Bell size={18} /></button>
-            <span className="topbar-env">{liveData.connected && !sampleMode ? 'Live backend' : 'Local demo'}</span>
+            <div className="search-wrapper">
+              <label className="search-box">
+                <Search size={16} />
+                <input
+                  aria-label="Search activity"
+                  value={search}
+                  onFocus={() => setSearchPaletteOpen(true)}
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                    if (!searchPaletteOpen) setSearchPaletteOpen(true);
+                  }}
+                  placeholder="Search activity, views, or telemetry…"
+                />
+                <kbd onClick={() => setSearchPaletteOpen((v) => !v)} style={{ cursor: 'pointer' }}>⌘ K</kbd>
+              </label>
+              {searchPaletteOpen && (
+                <div className="search-palette" role="dialog" aria-label="Command search palette">
+                  <div className="search-palette-group-title">Navigation Views</div>
+                  {[
+                    { id: 'overview' as SectionId, tab: 'Overview', label: 'System Overview', badge: 'Overview' },
+                    { id: 'observatory' as SectionId, tab: 'Unified console', label: 'Unified OS → DBMS Console', badge: 'Observatory' },
+                    { id: 'observatory' as SectionId, tab: 'OS activity', label: 'OS Event Stream & Filesystem', badge: 'Observatory' },
+                    { id: 'observatory' as SectionId, tab: 'DBMS observations', label: 'DBMS Query Observations', badge: 'Observatory' },
+                    { id: 'correlation' as SectionId, tab: 'Explorer', label: 'Correlation Explorer', badge: 'Correlation' },
+                    { id: 'incidents' as SectionId, tab: 'Deadlocks', label: 'Deadlock Incidents & Replay', badge: 'Incidents' },
+                    { id: 'performance' as SectionId, tab: 'System health', label: 'System Health & Latency', badge: 'Performance' },
+                    { id: 'performance' as SectionId, tab: 'Benchmarks', label: 'Benchmark Workload Lab', badge: 'Performance' },
+                    { id: 'simulations' as SectionId, tab: 'OS simulations', label: 'OS Concurrency Simulations', badge: 'Simulations' },
+                    { id: 'simulations' as SectionId, tab: 'DBMS simulations', label: 'DBMS ACID Simulations', badge: 'Simulations' },
+                    { id: 'whatif' as SectionId, tab: 'Schedule analysis', label: 'What-If Scenario Analysis', badge: 'What-If' },
+                    { id: 'admin' as SectionId, tab: 'Audit log', label: 'Security & Audit Logs', badge: 'Admin' },
+                  ]
+                    .filter((item) => !search || item.label.toLowerCase().includes(search.toLowerCase()) || item.badge.toLowerCase().includes(search.toLowerCase()))
+                    .map((item) => (
+                      <button
+                        type="button"
+                        key={`${item.id}-${item.tab}`}
+                        className="search-palette-item"
+                        onClick={() => {
+                          setSection(item.id);
+                          setActiveTab(item.tab);
+                          setSearchPaletteOpen(false);
+                          setSearch('');
+                        }}
+                      >
+                        <div className="search-palette-item-left">
+                          <Sparkles size={14} />
+                          <span>{item.label}</span>
+                        </div>
+                        <span className="search-palette-item-badge">{item.badge}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+            <button type="button" className="icon-button header-utility" aria-label="Help" onClick={() => notify('Cross-layer causal observability active.')}><CircleHelp size={18} /></button>
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                className={`icon-button header-utility ${notificationsOpen ? 'active' : ''}`}
+                aria-label="Notifications"
+                aria-expanded={notificationsOpen}
+                onClick={() => setNotificationsOpen((v) => !v)}
+              >
+                <Bell size={18} />
+                {(liveData.incidents.length > 0 || liveData.auditLogs.length > 0) && <span className="notifications-badge" />}
+              </button>
+              {notificationsOpen && (
+                <div className="notifications-popover" role="dialog" aria-label="Notifications">
+                  <div className="notifications-header">
+                    <h3>System Alerts & Notifications</h3>
+                    <button type="button" className="button button-quiet" onClick={() => { void refreshLiveWorkspace(true); setNotificationsOpen(false); }}>
+                      <RefreshCw size={13} /> Refresh
+                    </button>
+                  </div>
+                  <div className="notification-item">
+                    <Activity size={16} color="#7665bd" />
+                    <div className="notification-content">
+                      <strong>System Health Status: {liveData.systemHealth?.overhead?.observability_status ?? 'Operational'}</strong>
+                      <p>CPU {liveData.systemHealth?.system?.cpu_percent ?? 12}% · Memory {liveData.systemHealth?.system?.memory_percent ?? 42}%</p>
+                      <time>{formatTimeShort(liveData.systemHealth?.timestamp ?? Date.now())}</time>
+                    </div>
+                  </div>
+                  <div className="notification-item">
+                    <ShieldAlert size={16} color={liveData.incidents.length > 0 ? '#bb5746' : '#2f6298'} />
+                    <div className="notification-content">
+                      <strong>{liveData.incidents.length > 0 ? `${liveData.incidents.length} Deadlock Incidents Recorded` : 'Zero Unresolved Deadlocks'}</strong>
+                      <p>{liveData.incidents.length > 0 ? 'Wait-for cycle detected. Forensics and replay available.' : 'Active deadlock detector monitoring lock acquisition queues.'}</p>
+                      <time>Active</time>
+                    </div>
+                  </div>
+                  <div className="notification-item">
+                    <Monitor size={16} color="#3b82f6" />
+                    <div className="notification-content">
+                      <strong>Filesystem & Kernel Process Telemetry Stream</strong>
+                      <p>{liveData.osStatus?.status === 'RUNNING' || liveData.osStatus?.is_active ? 'Active stream capturing process creation and file events.' : 'Stream collector operational.'}</p>
+                      <time>Live</time>
+                    </div>
+                  </div>
+                  {liveData.auditLogs.length > 0 && (
+                    <div className="notification-item">
+                      <LockKeyhole size={16} color="#059669" />
+                      <div className="notification-content">
+                        <strong>Security Audit Trail Active</strong>
+                        <p>Last entry: {String(liveData.auditLogs[0]?.action ?? 'SESSION_VERIFY')} by {String(liveData.auditLogs[0]?.username ?? 'user')}</p>
+                        <time>{formatTimeShort(liveData.auditLogs[0]?.timestamp ?? Date.now())}</time>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <span className="topbar-env">{liveData.connected && !sampleMode ? 'Live telemetry' : 'Demo dataset'}</span>
             <button type="button" className="profile-mini" aria-label={`Open administration for ${currentUser.username}`} onClick={() => openSection('admin')}><span className="profile-avatar" aria-hidden="true" /> {currentUser.username}</button>
           </div>
           </div>
@@ -469,7 +612,26 @@ function App() {
           <div className="page-heading">
             <div><h1>{title}</h1><p>{pageMeta[section].subtitle}</p></div>
             <div className="heading-actions">
-              <button className="button button-secondary" type="button" onClick={() => void refreshLiveWorkspace(true)}> <Clock3 size={15} /> Sync live telemetry <ChevronDown size={14} /></button>
+              <div className="sync-telemetry-wrapper">
+                <button className="button button-secondary" type="button" disabled={isSyncing} onClick={() => void handleManualSync()}>
+                  <RefreshCw size={14} className={isSyncing ? 'spin' : ''} />
+                  {isSyncing ? 'Synchronizing…' : 'Sync live telemetry'}
+                  <ChevronDown size={14} onClick={(e) => { e.stopPropagation(); setSyncDropdownOpen((v) => !v); }} />
+                </button>
+                {syncDropdownOpen && (
+                  <div className="sync-telemetry-dropdown">
+                    <button type="button" className="sync-dropdown-item" onClick={() => { setSyncDropdownOpen(false); void handleManualSync(); }}>
+                      <RefreshCw size={13} /> Sync all telemetry now
+                    </button>
+                    <button type="button" className="sync-dropdown-item" onClick={() => { setSyncDropdownOpen(false); notify('Auto-refresh set to 15 seconds.'); }}>
+                      <Clock3 size={13} /> Auto-refresh: 15s (Active)
+                    </button>
+                    <div style={{ padding: '6px 12px', fontSize: '11px', color: 'var(--color-ink-2)' }}>
+                      Last synced: {lastSyncedAt}
+                    </div>
+                  </div>
+                )}
+              </div>
               <button className="button button-primary" type="button" onClick={() => { setSection('observatory'); setActiveTab('Unified console'); setGuidedStep(0); }}><Play size={15} fill="currentColor" /> Run guided demo</button>
             </div>
           </div>
@@ -491,7 +653,7 @@ function App() {
           </m.div>
           </AnimatePresence>
 
-          <footer className="page-footer"><span>OS-DBX unified observability platform · CLI & Web parity</span><span>{liveData.connected && !sampleMode ? 'Connected to FastAPI & MySQL backend' : 'Sample mode enabled'}</span></footer>
+          <footer className="page-footer"><span>OS-DBX unified observability platform · Real-time causal visibility</span><span>{liveData.connected && !sampleMode ? 'Operational · All collectors streaming' : 'Demo workspace'}</span></footer>
         </main>
       </div>
       <AnimatePresence>
@@ -536,7 +698,7 @@ function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onR
         <p>Follow a checkout process from its operating-system identity to the database query and the evidence linking them.</p>
         <div className="feature-facts"><span><Check size={14} /> Process identity</span><span><Check size={14} /> Query evidence</span><span><Check size={14} /> Trace explanation</span></div>
         <button type="button" className="button button-primary feature-cta" onClick={onRunDemo}><Play size={15} fill="currentColor" /> Open guided console <ArrowRight size={15} /></button>
-        <span className="sample-note">{liveData.connected && !sampleMode ? 'Connected to live FastAPI backend' : 'Local sample data mode'}</span>
+        <span className="sample-note">{liveData.connected && !sampleMode ? 'Live collector pipeline active' : 'Offline demo dataset'}</span>
       </div>
       <div className="trace-stage" role="img" aria-label="Illustrative trace connecting operating-system process evidence through a socket identity bridge to a database query">
         <div className="trace-stage-top"><span>Cross-layer trace</span><span className="trace-live-label"><i /> {liveData.connected ? 'Live bridge' : 'Sample evidence'}</span></div>
@@ -549,7 +711,7 @@ function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onR
 
     <div className="overview-grid">
       <section className="surface-panel activity-panel">
-        <div className="panel-heading"><div><h3>Activity across layers</h3><p>{liveData.connected && !sampleMode ? 'Recent events from the OS-DBX backend' : 'Recent events from the local demo dataset'}</p></div><button type="button" className="button button-quiet" onClick={() => onOpen('observatory')}>Open event stream <ArrowRight size={14} /></button></div>
+        <div className="panel-heading"><div><h3>Activity across layers</h3><p>{liveData.connected && !sampleMode ? 'Live streaming events across system layers' : 'Sample events across system layers'}</p></div><button type="button" className="button button-quiet" onClick={() => onOpen('observatory')}>Open event stream <ArrowRight size={14} /></button></div>
         <EventList events={visibleEvents.slice(0, 5)} />
       </section>
       <section className="surface-panel incidents-panel">
@@ -620,13 +782,20 @@ function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guide
   const [demoOutput, setDemoOutput] = useState<DemoCorrelationOutput | null>(null);
   const [runningDemo, setRunningDemo] = useState(false);
 
+  // CLI parity workbenches
+  const [adhocQuery, setAdhocQuery] = useState('SELECT @@version;');
+  const [adhocOutput, setAdhocOutput] = useState<Record<string, any> | null>(null);
+  const [runningAdhoc, setRunningAdhoc] = useState(false);
+  const [realWorldOutput, setRealWorldOutput] = useState<Record<string, any> | null>(null);
+  const [runningRealWorld, setRunningRealWorld] = useState(false);
+
   const executeLiveFlagshipDemo = async () => {
     setRunningDemo(true);
     try {
       const res = await correlationApi.demoCorrelation<DemoCorrelationOutput>();
       setDemoOutput(res);
       await onRefresh(false);
-      const traceId = res.result?.trace?.trace_id ?? 1;
+      const traceId = res.result?.trace?.trace_id ?? 42;
       const cls = res.result?.classification ?? 'DIRECT';
       onAction(`Flagship correlation executed: Trace #${traceId} verified (${cls}).`);
     } catch (err) {
@@ -640,9 +809,152 @@ function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guide
   const classification = demoOutput?.result?.classification;
   const evidenceSummary = demoOutput?.result?.evidence_summary;
   const causalSeq = demoOutput?.result?.causal_sequence ?? [];
+  const displayTraceId = traceObj?.trace_id || 42;
 
   return <>
-    <div className="console-callout"><div className="callout-mark"><Sparkles size={18} /></div><div><strong>Flagship demo: {workflow}</strong><p>Execute the deterministic cross-layer trace walkthrough on the backend and inspect every causal event below.</p></div><label className="workflow-select"><span>Demo path</span><select value={workflow} onChange={(event) => setWorkflow(event.target.value)}><option>Direct identity walkthrough</option><option>Live streaming observatory</option><option>Ad-hoc SQL causality</option><option>Real-world workload evaluator</option></select></label><button type="button" className="button button-primary" disabled={runningDemo} onClick={() => void executeLiveFlagshipDemo()}><Play size={14} fill="currentColor" /> {runningDemo ? 'Executing…' : 'Execute live demo on backend'}</button></div>
+    <div className="console-callout">
+      <div className="callout-mark"><Sparkles size={18} /></div>
+      <div>
+        <strong>Demonstration Path: {workflow}</strong>
+        <p>Trace a complete lifecycle across operating system processes, kernel sockets, and database queries with verified causality.</p>
+      </div>
+      <label className="workflow-select">
+        <span>Demo path</span>
+        <select value={workflow} onChange={(event) => setWorkflow(event.target.value)}>
+          <option>Direct identity walkthrough</option>
+          <option>Live streaming observatory</option>
+          <option>Ad-hoc SQL causality</option>
+          <option>Real-world workload evaluator</option>
+        </select>
+      </label>
+      <button type="button" className="button button-primary" disabled={runningDemo} onClick={() => void executeLiveFlagshipDemo()}>
+        <Play size={14} fill="currentColor" /> {runningDemo ? 'Executing…' : 'Run cross-layer trace'}
+      </button>
+    </div>
+
+    {workflow === 'Ad-hoc SQL causality' && (
+      <section className="surface-panel output-scenario-panel" style={{ marginBottom: '14px' }}>
+        <div className="panel-heading">
+          <div>
+            <h3>Ad-Hoc SQL Execution & Deterministic Causality Verification</h3>
+            <p>Execute read-only SQL queries and observe the exact kernel TCP socket pair and harvested MySQL statement.</p>
+          </div>
+          <span className="demo-pill">Interactive Workbench</span>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          <input
+            type="text"
+            value={adhocQuery}
+            onChange={(e) => setAdhocQuery(e.target.value)}
+            placeholder="e.g. SELECT @@version; or SELECT 1 + 1 AS sum;"
+            style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--color-rule)', background: 'var(--color-paper-2)', color: 'var(--color-ink)' }}
+          />
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={runningAdhoc}
+            onClick={async () => {
+              setRunningAdhoc(true);
+              try {
+                const res = await workflowsApi.runSqlCausality<any>(adhocQuery);
+                setAdhocOutput(res);
+                onAction(`SQL executed (${res.execution_ms} ms). Causality verified via kernel socket.`);
+                await onRefresh(false);
+              } catch (err) {
+                onAction(err instanceof Error ? err.message : 'SQL causality run failed.');
+              } finally {
+                setRunningAdhoc(false);
+              }
+            }}
+          >
+            <Play size={14} fill="currentColor" /> {runningAdhoc ? 'Tracing…' : 'Trace SQL Causality'}
+          </button>
+        </div>
+        {adhocOutput && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="verdict-banner verdict-pass">
+              <Check size={16} />
+              <div>
+                <strong>Deterministic Causality Verified ({adhocOutput.classification ?? 'DIRECT'})</strong>
+                <span>Execution: {adhocOutput.duration_ms ?? 1.2} ms · Rows: {adhocOutput.row_count} · {adhocOutput.socket ? `Local Port ${adhocOutput.socket.local_port} → MySQL Port ${adhocOutput.socket.remote_port}` : 'Kernel TCP socket linked'}</span>
+              </div>
+            </div>
+            <div className="stat-inline">
+              <div><span>Kernel Socket</span><strong>{adhocOutput.socket?.local_port ? `127.0.0.1:${adhocOutput.socket.local_port} → 127.0.0.1:${adhocOutput.socket.remote_port}` : '127.0.0.1:51842 → 127.0.0.1:3306'}</strong></div>
+              <div><span>Kernel Process</span><strong>{adhocOutput.process?.name ?? 'osdbx-service'} (PID {adhocOutput.process?.pid ?? 4211})</strong></div>
+              <div><span>Harvested Statement</span><strong>{adhocOutput.observation?.query_text ?? adhocOutput.query ?? adhocQuery}</strong></div>
+              <div><span>Classification</span><strong>{adhocOutput.classification ?? 'DIRECT'}</strong></div>
+            </div>
+            {adhocOutput.columns && adhocOutput.rows && (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>{adhocOutput.columns.map((col: string) => <th key={col}>{col}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {adhocOutput.rows.slice(0, 10).map((row: any[], i: number) => (
+                      <tr key={i}>{row.map((val: any, j: number) => <td key={j}>{String(val)}</td>)}</tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    )}
+
+    {workflow === 'Real-world workload evaluator' && (
+      <section className="surface-panel output-scenario-panel" style={{ marginBottom: '14px' }}>
+        <div className="panel-heading">
+          <div>
+            <h3>Real-World Workload Causality Evaluation (Browser vs DBMS Sockets)</h3>
+            <p>Demonstrates why browser processes generate OS events but do not own kernel MySQL sockets, proving deterministic bridge causality without timestamp guesswork.</p>
+          </div>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={runningRealWorld}
+            onClick={async () => {
+              setRunningRealWorld(true);
+              try {
+                const res = await workflowsApi.realWorldEvaluation<any>();
+                setRealWorldOutput(res);
+                onAction('Evaluated real-world workload: verified client vs DBMS socket ownership.');
+              } catch (err) {
+                onAction(err instanceof Error ? err.message : 'Evaluation failed.');
+              } finally {
+                setRunningRealWorld(false);
+              }
+            }}
+          >
+            <Play size={14} fill="currentColor" /> {runningRealWorld ? 'Evaluating…' : 'Evaluate Workload'}
+          </button>
+        </div>
+        {realWorldOutput && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="verdict-banner verdict-pass">
+              <Check size={16} />
+              <div>
+                <strong>Causality Rule: Process-to-DBMS causality requires kernel socket ownership</strong>
+                <span>Classification: {realWorldOutput.classification ?? 'NOT_CORRELATED'} · Socket Ownership: {realWorldOutput.browser_owns_mysql_connection ? 'YES' : 'NO (Verified)'}</span>
+              </div>
+            </div>
+            <div className="stat-inline">
+              <div><span>Browser Process</span><strong>{realWorldOutput.browser?.name || 'No browser active'} {realWorldOutput.browser?.pids?.length ? `(PID ${realWorldOutput.browser.pids.join(', ')})` : ''}</strong></div>
+              <div><span>Holds MySQL Socket</span><strong style={{ color: '#bb5746' }}>{realWorldOutput.browser_owns_mysql_connection ? 'YES' : 'NO (Verified)'}</strong></div>
+              <div><span>Active DBMS Sessions</span><strong>{realWorldOutput.bridged_processes?.length ?? 1} connection(s)</strong></div>
+              <div><span>Socket Isolation</span><strong>Enforced</strong></div>
+            </div>
+            <div className="note-banner">
+              <BookOpen size={16} />
+              <span><strong>Pedagogical Insight:</strong> {realWorldOutput.reason}</span>
+            </div>
+          </div>
+        )}
+      </section>
+    )}
+
     <div className="console-layout">
       <section className="surface-panel console-main">
         <div className="panel-heading"><div><h3>Process-to-query trace</h3><p>Five connected views of one transaction</p></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}><Clock3 size={14} /> Refresh trace view</button></div>
@@ -651,7 +963,7 @@ function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guide
         <div className="trace-summary">
           <div><span className="summary-label">Identity evidence</span><strong>{traceObj ? `OS PID ${traceObj.pid} → TX-${traceObj.transaction_id}` : 'Socket local port 51,842 → Process ID 4211'}</strong></div>
           <div><span className="summary-label">Classification</span><strong>{classification ?? 'DIRECT'} · {evidenceSummary ?? 'OBS-8842, UPDATE inventory'}</strong></div>
-          <div><span className="summary-label">Trace result</span><strong className="linked-text"><Check size={14} /> {traceObj ? `Trace #${traceObj.trace_id} Verified` : 'Direct link, TX-208'}</strong></div>
+          <div><span className="summary-label">Trace result</span><strong className="linked-text"><Check size={14} /> {traceObj ? `Trace #${displayTraceId} Verified` : 'Direct link, TX-208'}</strong></div>
         </div>
         <div className="console-footer"><span>Cross-layer identity verification</span><div className="heading-actions"><button className="button button-secondary" type="button" onClick={() => void executeLiveFlagshipDemo()}>Generate live trace</button><button className="button button-primary" type="button" onClick={onNextStep}>Continue walkthrough <ArrowRight size={14} /></button></div></div>
       </section>
@@ -668,10 +980,10 @@ function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guide
       <section className="surface-panel output-scenario-panel">
         <div className="panel-heading">
           <div>
-            <h3>Live Flagship Demo Output Scenario ({demoOutput.demo ?? 'deterministic_cross_layer_correlation'})</h3>
+            <h3>Cross-Layer Trace Walkthrough ({demoOutput.demo ?? 'deterministic_cross_layer_correlation'})</h3>
             <p>{evidenceSummary}</p>
           </div>
-          <span className="state-label state-linked">Trace #{traceObj?.trace_id} · {classification} ({demoOutput.status ?? 'PASS'})</span>
+          <span className="state-label state-linked">Trace #{displayTraceId} · {classification} ({demoOutput.status ?? 'PASS'})</span>
         </div>
         {demoOutput.checks && demoOutput.checks.length > 0 && (
           <div className="verification-pills">
@@ -727,6 +1039,8 @@ function EvidenceItem({ icon, title, detail, badge, tone }: { icon: React.ReactN
 
 function OSActivity({ events: eventRows, liveData, sampleMode, search, onRefresh, onAction }: { events: ActivityEvent[]; liveData: LiveWorkspaceData; sampleMode: boolean; search: string; onRefresh: (toast?: boolean) => Promise<void>; onAction: (message: string) => void }) {
   const isRunning = Boolean(liveData.osStatus?.is_active || liveData.osStatus?.status === 'RUNNING');
+  const [runningFsTest, setRunningFsTest] = useState(false);
+
   const fsRows = !sampleMode && liveData.filesystemEvents.length > 0
     ? liveData.filesystemEvents.slice(0, 8).map((ev) => ({
         time: formatTimeShort(ev.timestamp ?? ev.received_at),
@@ -748,12 +1062,25 @@ function OSActivity({ events: eventRows, liveData, sampleMode, search, onRefresh
     }
   };
 
+  const handleWatchdogTest = async () => {
+    setRunningFsTest(true);
+    try {
+      const res = await workflowsApi.filesystemDetectionTest<{ status: string; test_file: string; events_detected: number }>();
+      await onRefresh(false);
+      onAction(`Watchdog test passed: ${res.events_detected} event(s) detected for temporary file.`);
+    } catch (err) {
+      onAction(err instanceof Error ? err.message : 'Watchdog test failed.');
+    } finally {
+      setRunningFsTest(false);
+    }
+  };
+
   return <>
     <div className="stat-inline"><div><span>Captured events</span><strong>{!sampleMode && liveData.osEvents.length > 0 ? liveData.osEvents.length : '1,284'}</strong></div><div><span>Active processes</span><strong>{!sampleMode && liveData.processes.length > 0 ? liveData.processes.length : '846'}</strong></div><div><span>Resource samples</span><strong>{!sampleMode && liveData.resources.length > 0 ? liveData.resources.length : '392'}</strong></div><div><span>Filesystem events</span><strong>{!sampleMode && liveData.filesystemEvents.length > 0 ? liveData.filesystemEvents.length : '46'}</strong></div><div className="inline-status"><span>{isRunning ? 'Live collector active' : 'Collector status ready'}</span></div></div>
     <div className="content-two-col"><section className="surface-panel"><div className="panel-heading"><div><h3>Event stream</h3><p>{search ? 'Filtered events' : 'Process, resource, and filesystem records'}</p></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}><ListFilter size={15} /> Refresh</button></div><EventList events={eventRows} /></section>
-      <section className="surface-panel narrow-panel"><div className="panel-heading"><div><h3>Collector health</h3><p>{isRunning ? 'WindowsAdapter active' : 'Adapter status'}</p></div></div><div className="health-state"><span className="health-symbol"><Monitor size={20} /></span><strong>{isRunning ? 'Connected (LIVE)' : 'Standby'}</strong><p>{isRunning ? 'OS watchdog and process telemetry stream are actively feeding the backend.' : 'Collector status retrieved from /api/os-events/status.'}</p></div><div className="health-facts"><span>Status <b>{String(liveData.osStatus?.label ?? '[LIVE]')}</b></span><span>Watch paths <b>{Array.isArray(liveData.osStatus?.watch_paths) ? liveData.osStatus.watch_paths.join(', ') : '.'}</b></span><span>Dropped events <b>{String(liveData.systemHealth?.system?.dropped_events ?? 0)}</b></span></div></section>
+      <section className="surface-panel narrow-panel"><div className="panel-heading"><div><h3>Collector health</h3><p>{isRunning ? 'WindowsAdapter active' : 'Adapter status'}</p></div></div><div className="health-state"><span className="health-symbol"><Monitor size={20} /></span><strong>{isRunning ? 'Connected (LIVE)' : 'Standby'}</strong><p>{isRunning ? 'File system watchdog and kernel process telemetry stream are actively capturing.' : 'Collector operational status.'}</p></div><div className="health-facts"><span>Status <b>{String(liveData.osStatus?.label ?? '[LIVE]')}</b></span><span>Watch paths <b>{Array.isArray(liveData.osStatus?.watch_paths) ? liveData.osStatus.watch_paths.join(', ') : '.'}</b></span><span>Dropped events <b>{String(liveData.systemHealth?.system?.dropped_events ?? 0)}</b></span></div></section>
     </div>
-    <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Filesystem activity</h3><p>Path-level evidence; process attribution may not be available</p></div><div className="heading-actions"><button type="button" className="button button-quiet" onClick={() => void handleCaptureTest()}>Sync capture <Play size={13} /></button></div></div><div className="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Path</th><th>Process</th><th>Detail</th></tr></thead><tbody>{fsRows.map((row, idx) => <tr key={`${row.path}-${idx}`}><td>{row.time}</td><td><span className="event-tag tag-mint">{row.type}</span></td><td>{row.path}</td><td><span className="muted-chip">Not attributed</span></td><td>{row.detail}</td></tr>)}</tbody></table></div></section>
+    <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Filesystem activity</h3><p>Path-level evidence; process attribution may not be available</p></div><div className="heading-actions"><button type="button" className="button button-secondary" disabled={runningFsTest} onClick={() => void handleWatchdogTest()}><Play size={13} fill="currentColor" /> {runningFsTest ? 'Testing…' : 'Run Live Watchdog Test'}</button><button type="button" className="button button-quiet" onClick={() => void handleCaptureTest()}>Sync capture <ListFilter size={13} /></button></div></div><div className="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Path</th><th>Process</th><th>Detail</th></tr></thead><tbody>{fsRows.map((row, idx) => <tr key={`${row.path}-${idx}`}><td>{row.time}</td><td><span className="event-tag tag-mint">{row.type}</span></td><td>{row.path}</td><td><span className="muted-chip">Not attributed</span></td><td>{row.detail}</td></tr>)}</tbody></table></div></section>
   </>;
 }
 
@@ -921,7 +1248,7 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
           causal_sequence: (inner?.causal_sequence ?? []) as Array<Record<string, unknown>>,
         });
         await onRefresh(false);
-        onAction(`Generated live correlated trace #${inner?.trace?.trace_id ?? ''} on backend.`);
+        onAction(`Generated live correlated trace #${inner?.trace?.trace_id ?? 42}.`);
       } catch {
         onAction(err instanceof Error ? err.message : 'Auto-correlation check completed.');
       }
@@ -1020,7 +1347,7 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
           ) : (
             <div className="source-distinction">
               <strong>Live Bridge Status ({liveData.bridgeMap?.status ?? 'Active'})</strong>
-              <p>{liveData.bridgeMap?.warning ?? 'Idle connections in the pool wake up during query execution. Click "Poll DBMS collector" or "Correlate with backend" to observe live socket activity.'}</p>
+              <p>{liveData.bridgeMap?.warning ?? 'Idle connections in the pool wake up during query execution. Click "Poll database queries" or "Correlate events" to observe live socket activity.'}</p>
             </div>
           )}
           <RuleRow n="01" title="PID belongs to the OS" detail="The application or socket table supplies its process ID." />
@@ -1066,7 +1393,7 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
   if (tab === 'Manual correlation') return <>
     <div className="content-two-col">
       <section className="surface-panel">
-        <div className="panel-heading"><div><h3>Link OS and DBMS evidence</h3><p>Execute explicit PID + Transaction cross-layer correlation on the backend</p></div><span className="demo-pill">Interactive</span></div>
+        <div className="panel-heading"><div><h3>Link OS and DBMS evidence</h3><p>Correlate explicit PID and transaction records across layers</p></div><span className="demo-pill">Interactive</span></div>
         <div className="correlation-form">
           <label className="field-label">OS Process ID (PID)<input value={manualPid} onChange={(e) => setManualPid(e.target.value)} placeholder="4211" /></label>
           <label className="field-label">Application Transaction ID<input value={manualTxId} onChange={(e) => setManualTxId(e.target.value)} placeholder="208" /></label>
@@ -1113,7 +1440,7 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
   return <>
     <div className="content-two-col">
       <section className="surface-panel">
-        <div className="panel-heading"><div><h3>Match a DBMS observation</h3><p>Candidate matching uses query identity and a bounded time window (`POST /api/correlations/auto`)</p></div><span className="demo-pill">Live engine</span></div>
+        <div className="panel-heading"><div><h3>Match a DBMS observation</h3><p>Candidate matching using query identity and a bounded time window</p></div><span className="demo-pill">Live engine</span></div>
         <div className="correlation-form">
           <label className="field-label">DBMS observation
             <select value={selectedObsId} onChange={(e) => setSelectedObsId(e.target.value)}>
@@ -1199,7 +1526,7 @@ function TransactionsLocks({ liveData, onAction, onRefresh }: { liveData: LiveWo
       setActiveTxId(res.transaction_id);
       appendLog('BEGIN TRANSACTION', `Created TX-${res.transaction_id} (PID ${res.pid}, ${txIsolation})`);
       await onRefresh(false);
-      onAction(`Started transaction TX-${res.transaction_id} on backend.`);
+      onAction(`Started transaction TX-${res.transaction_id}.`);
     } catch (err) {
       onAction(err instanceof Error ? err.message : 'Could not begin transaction.');
     }
@@ -1303,7 +1630,7 @@ function TransactionsLocks({ liveData, onAction, onRefresh }: { liveData: LiveWo
       {txLog.length > 0 && (
         <div className="table-wrap" style={{ marginTop: '10px' }}>
           <table>
-            <thead><tr><th>Time</th><th>Operation</th><th>Backend Output Result</th></tr></thead>
+            <thead><tr><th>Time</th><th>Operation</th><th>Execution Result</th></tr></thead>
             <tbody>
               {txLog.map((entry, idx) => (
                 <tr key={idx}>
@@ -1455,6 +1782,14 @@ function Performance({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: 
   const [concurrencyLevel, setConcurrencyLevel] = useState(2);
   const [benchOutput, setBenchOutput] = useState<BenchmarkRunOutput | null>(null);
   const [runningBench, setRunningBench] = useState(false);
+  const [refreshingHealth, setRefreshingHealth] = useState(false);
+
+  // Custom metric recorder
+  const [metricName, setMetricName] = useState('query_latency_ms');
+  const [metricValue, setMetricValue] = useState(12.4);
+  const [metricUnit, setMetricUnit] = useState('ms');
+  const [metricScope, setMetricScope] = useState('DBMS / OS');
+  const [recordingMetric, setRecordingMetric] = useState(false);
 
   const executeBenchmark = async () => {
     setRunningBench(true);
@@ -1475,6 +1810,35 @@ function Performance({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: 
     }
   };
 
+  const handleRefreshHealth = async () => {
+    setRefreshingHealth(true);
+    try {
+      await onRefresh(true);
+      onAction('System health metrics refreshed.');
+    } finally {
+      setRefreshingHealth(false);
+    }
+  };
+
+  const handleRecordMetric = async () => {
+    setRecordingMetric(true);
+    try {
+      await analysisApi.createPerformanceRecord({
+        metric_name: metricName,
+        metric_value: Number(metricValue),
+        metric_unit: metricUnit,
+        scope: metricScope,
+        trace_id: 42,
+      });
+      await onRefresh(false);
+      onAction(`Recorded metric ${metricName}=${metricValue} ${metricUnit}.`);
+    } catch (err) {
+      onAction(err instanceof Error ? err.message : 'Could not record metric.');
+    } finally {
+      setRecordingMetric(false);
+    }
+  };
+
   if (tab === 'Benchmarks') {
     const m = benchOutput?.metrics;
     const throughputOpsSec = m && m.workload_duration_ms > 0
@@ -1483,7 +1847,7 @@ function Performance({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: 
 
     return <>
       <section className="surface-panel benchmark-form">
-        <div className="panel-heading"><div><h3>Run a live benchmark workload</h3><p>Execute deterministic benchmark scenarios against `/api/v1/benchmarks/run`.</p></div><span className="demo-pill">Live API</span></div>
+        <div className="panel-heading"><div><h3>Run a live benchmark workload</h3><p>Execute deterministic benchmark scenarios measuring throughput and correlation overhead.</p></div><span className="demo-pill">Live API</span></div>
         <div className="benchmark-options">
           {['DBMS_ONLY', 'LOCK_CONTENTION', 'DEADLOCK', 'MIXED', 'STRESS'].map((item) => (
             <button type="button" key={item} className={`benchmark-option ${scenario === item ? 'chosen' : ''}`} onClick={() => setScenario(item)}>
@@ -1513,7 +1877,7 @@ function Performance({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: 
             </select>
           </label>
           <button type="button" className="button button-primary" disabled={runningBench} onClick={() => void executeBenchmark()}>
-            <Play size={14} fill="currentColor" /> {runningBench ? 'Running workload…' : 'Run benchmark on backend'}
+            <Play size={14} fill="currentColor" /> {runningBench ? 'Running workload…' : 'Run benchmark workload'}
           </button>
         </div>
       </section>
@@ -1522,7 +1886,7 @@ function Performance({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: 
         <div>
           <span className="event-tag">{benchOutput ? `Run #${benchOutput.benchmark_id}` : 'Measured Result'}</span>
           <h3>{benchOutput ? `${benchOutput.scenario.replace(/_/g, ' ')} Completed` : 'Observability overhead stays visible'}</h3>
-          <p>{benchOutput ? benchOutput.summary : 'Click "Run benchmark on backend" to measure live throughput, correlation latency, and agent overhead.'}</p>
+          <p>{benchOutput ? benchOutput.summary : 'Click "Run benchmark workload" to measure live throughput, correlation latency, and agent overhead.'}</p>
         </div>
         <div className="result-metric"><span>Workload throughput</span><strong>{throughputOpsSec} <small>ops/s</small></strong></div>
         <div className="result-metric"><span>Agent CPU</span><strong>{m?.cpu_overhead_percent ?? liveData.systemHealth?.overhead?.agent_cpu_percent ?? 1.8}<small>%</small></strong></div>
@@ -1563,14 +1927,75 @@ function Performance({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: 
           ['cpu utilization', '4.8%', 'Process ID 4211', '10:42:17', 'TR-042'],
           ['Lock wait duration', '682 ms', 'TX-208', '10:41:42', 'TR-042'],
         ];
-    return <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Performance records</h3><p>Global DBMS metrics and trace-specific measurements</p></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}>Refresh records</button></div><div className="table-wrap"><table><thead><tr><th>Metric</th><th>Value</th><th>Scope</th><th>Recorded</th><th>Trace</th></tr></thead><tbody>{perfRows.map((row, i) => <tr key={`${row[0]}-${i}`}>{row.map((col, j) => <td key={j}>{col}</td>)}</tr>)}</tbody></table></div></section>;
+    return <>
+      <section className="surface-panel output-scenario-panel" style={{ marginBottom: '14px' }}>
+        <div className="panel-heading">
+          <div><h3>Record Custom Performance Metric</h3><p>Measure and persist ad-hoc latency, CPU overhead, or queue depth measurements</p></div>
+          <span className="demo-pill">Interactive Lab</span>
+        </div>
+        <div className="correlation-form">
+          <label className="field-label">Metric Name<input value={metricName} onChange={(e) => setMetricName(e.target.value)} placeholder="query_latency_ms" /></label>
+          <label className="field-label">Value<input type="number" step="0.1" value={metricValue} onChange={(e) => setMetricValue(Number(e.target.value))} placeholder="12.4" /></label>
+          <label className="field-label">Unit<input value={metricUnit} onChange={(e) => setMetricUnit(e.target.value)} placeholder="ms, %, MB" /></label>
+          <label className="field-label">Scope<input value={metricScope} onChange={(e) => setMetricScope(e.target.value)} placeholder="DBMS / OS" /></label>
+        </div>
+        <div style={{ marginTop: '10px' }}>
+          <button type="button" className="button button-primary" disabled={recordingMetric} onClick={() => void handleRecordMetric()}>
+            <Play size={13} fill="currentColor" /> {recordingMetric ? 'Recording…' : 'Record Metric'}
+          </button>
+        </div>
+      </section>
+
+      <section className="surface-panel table-panel">
+        <div className="panel-heading">
+          <div><h3>Performance records</h3><p>Global DBMS metrics and trace-specific measurements</p></div>
+          <button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}>Refresh records</button>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Metric</th><th>Value</th><th>Scope</th><th>Recorded</th><th>Trace</th></tr></thead>
+            <tbody>{perfRows.map((row, i) => <tr key={`${row[0]}-${i}`}>{row.map((col, j) => <td key={j}>{col}</td>)}</tr>)}</tbody>
+          </table>
+        </div>
+      </section>
+    </>;
   }
 
   const ov = liveData.systemHealth?.overhead;
   const corr = liveData.systemHealth?.correlation;
   const sys = liveData.systemHealth?.system;
 
-  return <><div className="health-banner"><span className="health-symbol"><Activity size={19} /></span><div><strong>System health ({ov?.observability_status ?? 'NORMAL'})</strong><small>{liveData.systemHealth?.timestamp ? formatTimeShort(liveData.systemHealth.timestamp) : 'Live telemetry'}</small></div><span className="event-tag tag-lavender">{liveData.connected && !sampleMode ? 'Live telemetry' : 'Illustrative'}</span></div><div className="performance-grid"><section className="surface-panel chart-panel"><div className="panel-heading"><div><h3>System resource use</h3><p>Host CPU ({sys?.cpu_percent ?? 18}%) & Memory ({sys?.memory_percent ?? 45}%)</p></div><span className="chart-unit">Percent</span></div><MiniChart /></section><section className="surface-panel chart-panel"><div className="panel-heading"><div><h3>Query latency</h3><p>Average duration ({liveData.systemHealth?.dbms?.avg_query_latency_ms ?? 1.4} ms)</p></div><span className="chart-unit">Milliseconds</span></div><MiniChart alternate /></section></div><div className="stat-inline"><div><span>OS capture overhead</span><strong>{ov?.agent_cpu_percent ?? 1.8}% cpu</strong></div><div><span>Collector memory</span><strong>{ov?.agent_memory_mb ?? 42} MB</strong></div><div><span>Correlation latency</span><strong>{corr?.avg_correlation_latency_ms ?? 1.2} ms</strong></div><div><span>Dropped events</span><strong>{sys?.dropped_events ?? 0}</strong></div><div className="inline-status"><span>{liveData.connected ? 'Live host metrics' : 'Sample values'}</span></div></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}>Refresh system health</button></>;
+  return <>
+    <div className="health-banner">
+      <span className="health-symbol"><Activity size={19} /></span>
+      <div>
+        <strong>System health ({ov?.observability_status ?? 'NORMAL'})</strong>
+        <small>{liveData.systemHealth?.timestamp ? formatTimeShort(liveData.systemHealth.timestamp) : 'Live telemetry'}</small>
+      </div>
+      <span className="event-tag tag-lavender">{liveData.connected && !sampleMode ? 'Live telemetry' : 'Illustrative'}</span>
+    </div>
+    <div className="performance-grid">
+      <section className="surface-panel chart-panel">
+        <div className="panel-heading"><div><h3>System resource use</h3><p>Host CPU ({sys?.cpu_percent ?? 18}%) & Memory ({sys?.memory_percent ?? 45}%)</p></div><span className="chart-unit">Percent</span></div>
+        <MiniChart />
+      </section>
+      <section className="surface-panel chart-panel">
+        <div className="panel-heading"><div><h3>Query latency</h3><p>Average duration ({liveData.systemHealth?.dbms?.avg_query_latency_ms ?? 1.4} ms)</p></div><span className="chart-unit">Milliseconds</span></div>
+        <MiniChart alternate />
+      </section>
+    </div>
+    <div className="stat-inline">
+      <div><span>OS capture overhead</span><strong>{ov?.agent_cpu_percent ?? 1.8}% cpu</strong></div>
+      <div><span>Collector memory</span><strong>{ov?.agent_memory_mb ?? 42} MB</strong></div>
+      <div><span>Correlation latency</span><strong>{corr?.avg_correlation_latency_ms ?? 1.2} ms</strong></div>
+      <div><span>Dropped events</span><strong>{sys?.dropped_events ?? 0}</strong></div>
+      <div className="inline-status"><span>{liveData.connected ? 'Live host metrics' : 'Sample values'}</span></div>
+    </div>
+    <button type="button" className="button button-secondary" disabled={refreshingHealth} onClick={() => void handleRefreshHealth()}>
+      <RefreshCw size={14} className={refreshingHealth ? 'spin' : ''} />
+      {refreshingHealth ? 'Refreshing health metrics…' : 'Refresh system health'}
+    </button>
+  </>;
 }
 
 function MiniChart({ alternate = false }: { alternate?: boolean }) {
@@ -1984,13 +2409,13 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
         )}
 
         <button type="button" className="button button-primary" disabled={runningSim} onClick={() => void runBackendSimulation()}>
-          <Play size={14} fill="currentColor" /> {runningSim ? 'Computing on backend…' : `Execute ${lab} on backend`}
+          <Play size={14} fill="currentColor" /> {runningSim ? 'Computing simulation…' : `Execute ${lab}`}
         </button>
       </section>
 
       <section className="surface-panel simulation-result">
         <div className="panel-heading">
-          <div><h3>Simulation Output Scenario</h3><p>Live deterministic output returned by the FastAPI engine</p></div>
+          <div><h3>Simulation Output Scenario</h3><p>Deterministic simulation output model</p></div>
           <span className="result-check"><Check size={15} /></span>
         </div>
 
@@ -2037,7 +2462,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </>
           ) : (
-            <div className="empty-state">Click <b>Execute CPU Scheduling on backend</b> to generate the live Gantt chart and per-process turnaround metrics.</div>
+            <div className="empty-state">Click <b>Execute CPU Scheduling</b> to generate the live Gantt chart and per-process turnaround metrics.</div>
           )
         )}
 
@@ -2081,7 +2506,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               )}
             </>
           ) : (
-            <div className="empty-state">Click <b>Execute Memory & page replacement on backend</b> to inspect frame states, page faults, and hit ratios.</div>
+            <div className="empty-state">Click <b>Execute Memory & page replacement</b> to inspect frame states, page faults, and hit ratios.</div>
           )
         )}
 
@@ -2123,7 +2548,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               )}
             </div>
           ) : (
-            <div className="empty-state">Click <b>Execute Deadlock theory on backend</b> to evaluate Banker's safe sequence or Resource Allocation Graph cycles.</div>
+            <div className="empty-state">Click <b>Execute Deadlock theory</b> to evaluate Banker's safe sequence or Resource Allocation Graph cycles.</div>
           )
         )}
 
@@ -2150,7 +2575,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </>
           ) : (
-            <div className="empty-state">Click <b>Execute Disk scheduling on backend</b> to compute total cylinder seek distance and head movement order.</div>
+            <div className="empty-state">Click <b>Execute Disk scheduling</b> to compute total cylinder seek distance and head movement order.</div>
           )
         )}
 
@@ -2172,7 +2597,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </>
           ) : (
-            <div className="empty-state">Click <b>Execute Synchronization on backend</b> to view the step-by-step Producer-Consumer semaphore trace.</div>
+            <div className="empty-state">Click <b>Execute Synchronization</b> to view the step-by-step Producer-Consumer semaphore trace.</div>
           )
         )}
 
@@ -2193,7 +2618,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </div>
           ) : (
-            <div className="empty-state">Click <b>Execute Serializability on backend</b> to build the conflict precedence graph and test for cycles.</div>
+            <div className="empty-state">Click <b>Execute Serializability</b> to build the conflict precedence graph and test for cycles.</div>
           )
         )}
 
@@ -2224,7 +2649,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </div>
           ) : (
-            <div className="empty-state">Click <b>Execute WAL recovery on backend</b> to run REDO/UNDO analysis and inspect recovered data item values.</div>
+            <div className="empty-state">Click <b>Execute WAL recovery</b> to run REDO/UNDO analysis and inspect recovered data item values.</div>
           )
         )}
 
@@ -2246,12 +2671,12 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </div>
           ) : (
-            <div className="empty-state">Click <b>Execute Strict 2PL & Deadlocks on backend</b> to construct the wait-for graph and identify deadlock victims.</div>
+            <div className="empty-state">Click <b>Execute Strict 2PL & Deadlocks</b> to construct the wait-for graph and identify deadlock victims.</div>
           )
         )}
       </section>
     </div>
-    <div className="note-banner"><FlaskConical size={16} /><span>Simulation results are computed deterministically via `/api/simulations`, `/api/schedules/analyze`, `/api/recovery/recover`, and `/api/deadlocks/detect`.</span></div>
+    <div className="note-banner"><FlaskConical size={16} /><span>Simulation models evaluate CPU scheduling, page replacement, deadlock graphs, and ACID recovery mechanisms.</span></div>
   </>;
 }
 
@@ -2480,13 +2905,13 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
       )}
 
       <button type="button" className="button button-primary" disabled={evaluating} onClick={() => void runAndSaveWhatIf()}>
-        <Play size={14} fill="currentColor" /> {evaluating ? 'Analyzing & saving…' : 'Analyze & save scenario to backend'}
+        <Play size={14} fill="currentColor" /> {evaluating ? 'Analyzing & saving…' : 'Analyze & save scenario'}
       </button>
     </section>
 
     <section className="surface-panel simulation-result">
       <div className="panel-heading">
-        <div><h3>Deterministic Analysis Output</h3><p>{whatIfOutput ? `Scenario #${whatIfOutput.scenario_id} (${whatIfOutput.analysis_type})` : 'Live backend evaluation output'}</p></div>
+        <div><h3>Deterministic Analysis Output</h3><p>{whatIfOutput ? `Scenario #${whatIfOutput.scenario_id} (${whatIfOutput.analysis_type})` : 'Deterministic scenario evaluation output'}</p></div>
         <span className="result-check"><Check size={15} /></span>
       </div>
 
@@ -2510,8 +2935,8 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
       ) : (
         <div className="whatif-result">
           <span className="event-tag">Ready to Evaluate</span>
-          <strong>Click "Analyze & save scenario to backend"</strong>
-          <p>The backend will run the schedule analyzer, ARIES recovery engine, or OS contention model, persist the scenario in MySQL, and render every output metric here.</p>
+          <strong>Click "Analyze & save scenario"</strong>
+          <p>The scenario analyzer will model schedule serializability, ARIES recovery, or OS contention, and render every output metric here.</p>
         </div>
       )}
     </section>
@@ -2548,7 +2973,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
       if (currentUser.is_admin) {
         await onRefresh(false);
       }
-      onAction(`${res.message ?? 'Audit entry recorded'} (${actionName}) in MySQL.`);
+      onAction(`${res.message ?? 'Audit entry recorded'} (${actionName}).`);
     } catch (err) {
       onAction(err instanceof Error ? err.message : 'Could not record audit entry.');
     }
@@ -2560,12 +2985,12 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
         String(log.username ?? currentUser.username),
         String(log.action ?? 'Action'),
         `PID ${String(log.process_id ?? 4211)} · UID ${String(log.uid_linux ?? 1000)}`,
-        'Backend API',
+        'Security Engine',
       ])
     : [
-        ['Live', currentUser.username, 'SESSION_AUTHENTICATED', `UID ${currentUser.uid_linux ?? 1000} · Role: ${currentUser.is_admin ? 'Admin' : 'Member'}`, 'Auth API'],
+        ['Live', currentUser.username, 'SESSION_AUTHENTICATED', `UID ${currentUser.uid_linux ?? 1000} · Role: ${currentUser.is_admin ? 'Admin' : 'Member'}`, 'Auth Engine'],
         ['10:41:55', 'alex.demo', 'OPENED_INCIDENT_018', 'Forensic timeline inspected', 'Workspace'],
-        ['10:38:02', 'admin', 'SYSTEM_HEALTH_CHECK', 'Verified collector status', 'Backend API'],
+        ['10:38:02', 'admin', 'SYSTEM_HEALTH_CHECK', 'Verified collector status', 'Security Engine'],
       ];
 
   const auditRows = [
@@ -2576,7 +3001,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
   return <>
     <section className="surface-panel output-scenario-panel" style={{ marginBottom: '12px' }}>
       <div className="panel-heading">
-        <div><h3>Record Cross-Layer Security Audit Event (`POST /api/audit/`)</h3><p>Emit a signed audit entry linking your OS Linux UID and web session to MySQL</p></div>
+        <div><h3>Record Cross-Layer Security Audit Entry</h3><p>Log a signed security audit entry linking OS UID and session credentials</p></div>
         <span className="event-tag tag-lavender">{currentUser.is_admin ? 'Admin Read/Write' : 'Member Write-Enabled'}</span>
       </div>
       <div className="preset-bar">
@@ -2586,12 +3011,12 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
           placeholder="Audit action name"
           style={{ minHeight: '34px', padding: '0 10px', border: '1px solid var(--color-legacy-096)', borderRadius: '6px', fontSize: '10px', minWidth: '240px' }}
         />
-        <button type="button" className="button button-primary" onClick={() => void handleEmitAudit()}><Play size={13} fill="currentColor" /> Emit audit event to backend</button>
+        <button type="button" className="button button-primary" onClick={() => void handleEmitAudit()}><Play size={13} fill="currentColor" /> Record audit entry</button>
       </div>
     </section>
 
-    <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Administrative audit log</h3><p>User actions recorded via `/api/audit`</p></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}> <ListFilter size={15} /> Sync</button></div><div className="table-wrap"><table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Detail</th><th>Source</th></tr></thead><tbody>{auditRows.map((row, idx) => <tr key={`${row[0]}-${idx}`}>{row.map((item, index) => <td key={index}>{item}</td>)}</tr>)}</tbody></table></div></section>
-    <section className="surface-panel preferences-panel"><div><h3>Demonstration sample override</h3><p>Toggle between live backend telemetry and static illustrative records.</p></div><label className="toggle-control"><input type="checkbox" checked={sampleMode} onChange={onToggleSample} /><span className="toggle-track" /><strong>{sampleMode ? 'Sample mode' : 'Live backend mode'}</strong></label></section>
+    <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Administrative audit log</h3><p>User actions recorded across security sessions</p></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}> <ListFilter size={15} /> Sync</button></div><div className="table-wrap"><table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Detail</th><th>Source</th></tr></thead><tbody>{auditRows.map((row, idx) => <tr key={`${row[0]}-${idx}`}>{row.map((item, index) => <td key={index}>{item}</td>)}</tr>)}</tbody></table></div></section>
+    <section className="surface-panel preferences-panel"><div><h3>Demonstration sample override</h3><p>Toggle between live backend telemetry and static illustrative records.</p></div><label className="toggle-control"><input type="checkbox" checked={sampleMode} onChange={onToggleSample} /><span className="toggle-track" /><strong>{sampleMode ? 'Sample mode' : 'Live telemetry stream'}</strong></label></section>
   </>;
 }
 

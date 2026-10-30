@@ -363,57 +363,146 @@ def list_filesystem_events(limit: int = 50) -> list[dict]:
     return unique_events[:limit]
 
 
+_snapshot_cache: dict[str, tuple[float, list[dict]]] = {}
+_snapshot_refreshing: set[str] = set()
+_snapshot_lock = threading.Lock()
+_SNAPSHOT_TTL_SECONDS = 10.0
+
+
+def _cached_snapshot(key: str, builder) -> list[dict]:
+    """Return a cached snapshot; refresh stale entries in the background.
+
+    Process enumeration on Windows can take several seconds, so callers get the
+    last snapshot immediately while a background thread rebuilds it.
+    """
+    import time as _time
+
+    now = _time.monotonic()
+    with _snapshot_lock:
+        cached = _snapshot_cache.get(key)
+        fresh = cached is not None and (now - cached[0]) < _SNAPSHOT_TTL_SECONDS
+        should_refresh = not fresh and key not in _snapshot_refreshing
+        if should_refresh and cached is not None:
+            _snapshot_refreshing.add(key)
+
+    def _rebuild() -> list[dict]:
+        try:
+            data = builder()
+            with _snapshot_lock:
+                _snapshot_cache[key] = (_time.monotonic(), data)
+            return data
+        finally:
+            with _snapshot_lock:
+                _snapshot_refreshing.discard(key)
+
+    if cached is None:
+        return _rebuild()
+    if should_refresh:
+        threading.Thread(target=_rebuild, daemon=True).start()
+    return cached[1]
+
+
+def _build_process_snapshot() -> list[dict]:
+    try:
+        from os_monitor.collector import snapshot_processes
+        snapshot = snapshot_processes()
+    except Exception:
+        return []
+    result = []
+    for pid, info in snapshot.items():
+        result.append({
+            "pid": pid,
+            "ppid": info.get("ppid"),
+            "name": info.get("name"),
+            "user": info.get("user"),
+            "file_path": info.get("file_path"),
+            "state": info.get("state")
+        })
+    sorted_res = sorted(result, key=lambda x: x["pid"])
+    try:
+        from app.config.database import get_connection
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            for proc in sorted_res[:200]:
+                cur.execute(
+                    """
+                    INSERT INTO processes (pid, ppid, name, user, file_path, state)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        ppid = VALUES(ppid),
+                        name = VALUES(name),
+                        user = VALUES(user),
+                        file_path = COALESCE(VALUES(file_path), file_path),
+                        state = VALUES(state)
+                    """,
+                    (
+                        proc["pid"],
+                        proc.get("ppid"),
+                        proc.get("name") or "unknown",
+                        proc.get("user") or "system",
+                        proc.get("file_path"),
+                        str(proc.get("state") or "RUNNING")[:50],
+                    ),
+                )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return sorted_res
+
+
+def _build_resource_snapshot() -> list[dict]:
+    try:
+        from os_monitor.resource_monitor import collect_metrics
+        metrics = collect_metrics()
+    except Exception:
+        return []
+    try:
+        from app.config.database import get_connection
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            for m in metrics[:100]:
+                pid = m.get("pid")
+                if pid and int(pid) > 0:
+                    cur.execute(
+                        """
+                        INSERT IGNORE INTO processes (pid, ppid, name, user, state)
+                        VALUES (%s, 0, %s, %s, 'RUNNING')
+                        """,
+                        (int(pid), m.get("name") or "unknown", m.get("user") or "system"),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO resource_metrics (pid, cpu_percent, memory_mb, io_read_bytes, io_write_bytes, timestamp)
+                        VALUES (%s, %s, %s, %s, %s, NOW())
+                        """,
+                        (
+                            int(pid),
+                            float(m.get("cpu_percent") or 0.0),
+                            float(m.get("memory_rss_mb") or 0.0),
+                            int(m.get("io_read_bytes") or 0),
+                            int(m.get("io_write_bytes") or 0),
+                        ),
+                    )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return metrics
+
+
 @router.get("/processes")
 def list_processes(limit: int = 50) -> list[dict]:
     """Return real-time running process snapshot using Person 1's collector."""
     try:
-        from os_monitor.collector import snapshot_processes
-        snapshot = snapshot_processes()
-        result = []
-        for pid, info in snapshot.items():
-            result.append({
-                "pid": pid,
-                "ppid": info.get("ppid"),
-                "name": info.get("name"),
-                "user": info.get("user"),
-                "file_path": info.get("file_path"),
-                "state": info.get("state")
-            })
-        sorted_res = sorted(result, key=lambda x: x["pid"])[:limit]
-        try:
-            from app.config.database import get_connection
-            conn = get_connection()
-            try:
-                cur = conn.cursor()
-                for proc in sorted_res:
-                    cur.execute(
-                        """
-                        INSERT INTO processes (pid, ppid, name, user, file_path, state)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            ppid = VALUES(ppid),
-                            name = VALUES(name),
-                            user = VALUES(user),
-                            file_path = COALESCE(VALUES(file_path), file_path),
-                            state = VALUES(state)
-                        """,
-                        (
-                            proc["pid"],
-                            proc.get("ppid"),
-                            proc.get("name") or "unknown",
-                            proc.get("user") or "system",
-                            proc.get("file_path"),
-                            str(proc.get("state") or "RUNNING")[:50],
-                        ),
-                    )
-                conn.commit()
-                cur.close()
-            finally:
-                conn.close()
-        except Exception:
-            pass
-        return sorted_res
-    except Exception as e:
+        return _cached_snapshot("processes", _build_process_snapshot)[:limit]
+    except Exception:
         return []
 
 
@@ -421,44 +510,8 @@ def list_processes(limit: int = 50) -> list[dict]:
 def list_resource_metrics(limit: int = 50) -> list[dict]:
     """Return real-time per-process resource metrics using Person 1's collector."""
     try:
-        from os_monitor.resource_monitor import collect_metrics
-        metrics = collect_metrics()[:limit]
-        try:
-            from app.config.database import get_connection
-            conn = get_connection()
-            try:
-                cur = conn.cursor()
-                for m in metrics:
-                    pid = m.get("pid")
-                    if pid and int(pid) > 0:
-                        cur.execute(
-                            """
-                            INSERT IGNORE INTO processes (pid, ppid, name, user, state)
-                            VALUES (%s, 0, %s, %s, 'RUNNING')
-                            """,
-                            (int(pid), m.get("name") or "unknown", m.get("user") or "system"),
-                        )
-                        cur.execute(
-                            """
-                            INSERT INTO resource_metrics (pid, cpu_percent, memory_mb, io_read_bytes, io_write_bytes, timestamp)
-                            VALUES (%s, %s, %s, %s, %s, NOW())
-                            """,
-                            (
-                                int(pid),
-                                float(m.get("cpu_percent") or 0.0),
-                                float(m.get("memory_rss_mb") or 0.0),
-                                int(m.get("io_read_bytes") or 0),
-                                int(m.get("io_write_bytes") or 0),
-                            ),
-                        )
-                conn.commit()
-                cur.close()
-            finally:
-                conn.close()
-        except Exception:
-            pass
-        return metrics
-    except Exception as e:
+        return _cached_snapshot("resources", _build_resource_snapshot)[:limit]
+    except Exception:
         return []
 
 

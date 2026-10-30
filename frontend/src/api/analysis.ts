@@ -2,6 +2,7 @@ import { apiRequest, postJson } from './client';
 
 export const analysisApi = {
   performanceRecords: <T>() => apiRequest<T[]>('/performance/records'),
+  createPerformanceRecord: <T>(payload: unknown) => postJson<T>('/performance/records', payload),
   systemHealth: <T>() => apiRequest<T>('/performance/system-health'),
   scenarios: <T>() => apiRequest<T[]>('/what-if/scenarios'),
   getScenario: <T>(id: number) => apiRequest<T>(`/what-if/scenarios/${id}`),
