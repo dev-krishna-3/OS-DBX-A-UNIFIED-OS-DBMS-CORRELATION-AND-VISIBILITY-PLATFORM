@@ -989,6 +989,193 @@ button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, 
 .app-shell[data-theme="coral"] .trace-stage { border-color: #d6bdb3; background: linear-gradient(145deg, #fdfaf5, #eeded6); }
 .app-shell[data-theme="coral"] .trace-live-label { background: #d9e7d9; color: #3e6145; }
 
+/* --------------------------------------------------------------------------
+   OS-DBX Appearance Tones: Light tone, Dark tone, and Blue tone
+   -------------------------------------------------------------------------- */
+
+.app-shell[data-theme="light"],
+.app-shell[data-theme="original"] {
+  color-scheme: light;
+  --color-paper: #f5f4fa;
+  --color-paper-2: #eeecf5;
+  --color-paper-3: #ffffff;
+  --color-ink: #302d42;
+  --color-ink-2: #605b76;
+  --color-muted: #797391;
+  --color-rule: #ddd9e8;
+  --color-accent: #7665bd;
+  --color-accent-ink: #ffffff;
+  --color-focus: #61539d;
+  --color-identity: #efecfa;
+  --color-os: #dff1e9;
+  --color-dbms: #e4eff8;
+  --color-attention: #f9e9df;
+  --color-positive-ink: #386a4e;
+  --color-warning-ink: #865039;
+  --color-nav-active: #f8f7fc;
+  --shadow-surface: 0 4px 16px rgba(63, 54, 97, .06);
+}
+.app-shell[data-theme="light"] .app-header,
+.app-shell[data-theme="original"] .app-header {
+  background: rgba(245, 244, 250, .96);
+  border-bottom: 1px solid var(--color-rule);
+}
+.app-shell[data-theme="light"] .trace-hero {
+  border-color: #d8d4e5;
+  background: radial-gradient(ellipse at 76% 48%, #eee9f8 0, #f5f2fa 48%, #faf9fd 100%);
+}
+.app-shell[data-theme="light"] .trace-stage {
+  border-color: #d6d0e6;
+  background: linear-gradient(145deg, #ffffff, #f2eff9);
+}
+.app-shell[data-theme="light"] .trace-live-label {
+  background: #dff1e9;
+  color: #386a4e;
+}
+
+.app-shell[data-theme="dark"] {
+  color-scheme: dark;
+  --color-paper: #11141c;
+  --color-paper-2: #181d28;
+  --color-paper-3: #1f2533;
+  --color-ink: #e6edf3;
+  --color-ink-2: #9eaab9;
+  --color-muted: #778599;
+  --color-rule: #2d3546;
+  --color-accent: #8b7ef8;
+  --color-accent-ink: #0f131a;
+  --color-focus: #a59bfa;
+  --color-identity: #2c253b;
+  --color-os: #1a3028;
+  --color-dbms: #1d2c3e;
+  --color-attention: #3b281f;
+  --color-positive-ink: #bce3cb;
+  --color-warning-ink: #f0be9d;
+  --color-nav-active: #2b3345;
+  --color-dbms-ink: #9fc7ed;
+  --shadow-surface: 0 8px 24px rgba(0, 0, 0, .45);
+}
+.app-shell[data-theme="dark"] .app-header {
+  background: rgba(17, 20, 28, .96);
+  border-bottom: 1px solid var(--color-rule);
+}
+.app-shell[data-theme="dark"] .trace-hero {
+  border-color: #2e3a4e;
+  background: radial-gradient(ellipse at 76% 48%, #1f2738 0, #171e2c 52%, #11151f 100%);
+}
+.app-shell[data-theme="dark"] .trace-stage {
+  border-color: #2d384c;
+  background: linear-gradient(145deg, #222b3d, #1a2130);
+}
+.app-shell[data-theme="dark"] .trace-live-label {
+  background: #233b2e;
+  color: #c9e9d6;
+}
+
+.app-shell[data-theme="blue"] {
+  color-scheme: dark;
+  --color-paper: #09121f;
+  --color-paper-2: #0f1c30;
+  --color-paper-3: #162640;
+  --color-ink: #e3effd;
+  --color-ink-2: #94b2db;
+  --color-muted: #6a8bb7;
+  --color-rule: #1e385c;
+  --color-accent: #3b82f6;
+  --color-accent-ink: #ffffff;
+  --color-focus: #60a5fa;
+  --color-identity: #212c4d;
+  --color-os: #112d26;
+  --color-dbms: #143254;
+  --color-attention: #382717;
+  --color-positive-ink: #a7dfb8;
+  --color-warning-ink: #f0b78e;
+  --color-nav-active: #1b3559;
+  --color-dbms-ink: #a4c9f5;
+  --shadow-surface: 0 8px 24px rgba(4, 9, 18, .55);
+}
+.app-shell[data-theme="blue"] .app-header {
+  background: rgba(9, 18, 31, .96);
+  border-bottom: 1px solid var(--color-rule);
+}
+.app-shell[data-theme="blue"] .trace-hero {
+  border-color: #213f68;
+  background: radial-gradient(ellipse at 76% 48%, #142845 0, #0f1e35 52%, #0a1322 100%);
+}
+.app-shell[data-theme="blue"] .trace-stage {
+  border-color: #213f68;
+  background: linear-gradient(145deg, #182b48, #112036);
+}
+.app-shell[data-theme="blue"] .trace-live-label {
+  background: #143828;
+  color: #bbf0cf;
+}
+
+/* --------------------------------------------------------------------------
+   Top Bar Appearance Segmented Control
+   -------------------------------------------------------------------------- */
+.appearance-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.appearance-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  transition: all var(--dur-micro) ease;
+  white-space: nowrap;
+}
+
+.appearance-btn:hover {
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.appearance-btn.active {
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+
+.appearance-persistence-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: color-mix(in srgb, var(--color-os) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-positive-ink) 25%, transparent);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--color-positive-ink);
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .appearance-btn span {
+    display: none;
+  }
+  .appearance-btn {
+    padding: 5px 8px;
+  }
+}
+
 .app-shell[data-theme="indigo-dark"] {
   color-scheme: dark;
   --color-paper: #282c36; --color-paper-2: #313743; --color-paper-3: #3a414d;
@@ -1031,14 +1218,31 @@ button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, 
 .app-shell[data-theme="tidal-dark"] .trace-stage { border-color: #506159; background: linear-gradient(145deg, #414e47, #323e3a); }
 .app-shell[data-theme="tidal-dark"] .trace-live-label { background: #435347; color: #c8dbc4; }
 
+.app-shell[data-theme="dark"] .trace-stage .slab-heading,
+.app-shell[data-theme="blue"] .trace-stage .slab-heading,
 .app-shell[data-theme$="-dark"] .trace-stage .slab-heading,
+.app-shell[data-theme="dark"] .trace-stage .slab-content,
+.app-shell[data-theme="blue"] .trace-stage .slab-content,
 .app-shell[data-theme$="-dark"] .trace-stage .slab-content,
+.app-shell[data-theme="dark"] .trace-stage .bridge-label,
+.app-shell[data-theme="blue"] .trace-stage .bridge-label,
 .app-shell[data-theme$="-dark"] .trace-stage .bridge-label { color: var(--color-ink); }
+
+.app-shell[data-theme="dark"] .trace-stage .slab-heading small,
+.app-shell[data-theme="blue"] .trace-stage .slab-heading small,
 .app-shell[data-theme$="-dark"] .trace-stage .slab-heading small,
+.app-shell[data-theme="dark"] .trace-stage .mini-usage,
+.app-shell[data-theme="blue"] .trace-stage .mini-usage,
 .app-shell[data-theme$="-dark"] .trace-stage .mini-usage,
+.app-shell[data-theme="dark"] .trace-stage .bridge-label b,
+.app-shell[data-theme="blue"] .trace-stage .bridge-label b,
 .app-shell[data-theme$="-dark"] .trace-stage .bridge-label b,
+.app-shell[data-theme="dark"] .trace-stage .query-meta,
+.app-shell[data-theme="blue"] .trace-stage .query-meta,
 .app-shell[data-theme$="-dark"] .trace-stage .query-meta { color: var(--color-ink-2); }
 
+.app-shell[data-theme="dark"],
+.app-shell[data-theme="blue"],
 .app-shell[data-theme$="-dark"] {
   --color-legacy-001: var(--color-ink); --color-legacy-002: var(--color-paper); --color-legacy-003: var(--color-ink-2);
   --color-legacy-005: var(--color-rule); --color-legacy-006: var(--color-rule); --color-legacy-007: var(--color-paper-3);
@@ -1047,19 +1251,47 @@ button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, 
   --color-legacy-014: var(--color-dbms); --color-legacy-015: var(--color-dbms-ink); --color-legacy-016: var(--color-attention);
   --color-legacy-017: var(--color-warning-ink); --color-legacy-018: var(--color-warning-ink);
 }
+.app-shell[data-theme="dark"] .surface-panel,
+.app-shell[data-theme="blue"] .surface-panel,
 .app-shell[data-theme$="-dark"] .surface-panel,
+.app-shell[data-theme="dark"] .stat-inline,
+.app-shell[data-theme="blue"] .stat-inline,
 .app-shell[data-theme$="-dark"] .stat-inline,
+.app-shell[data-theme="dark"] .console-callout,
+.app-shell[data-theme="blue"] .console-callout,
 .app-shell[data-theme$="-dark"] .console-callout,
+.app-shell[data-theme="dark"] .trace-stage,
+.app-shell[data-theme="blue"] .trace-stage,
 .app-shell[data-theme$="-dark"] .trace-stage,
+.app-shell[data-theme="dark"] .theme-preview-panel,
+.app-shell[data-theme="blue"] .theme-preview-panel,
 .app-shell[data-theme$="-dark"] .theme-preview-panel,
+.app-shell[data-theme="dark"] .theme-option,
+.app-shell[data-theme="blue"] .theme-option,
 .app-shell[data-theme$="-dark"] .theme-option,
+.app-shell[data-theme="dark"] .profile-mini,
+.app-shell[data-theme="blue"] .profile-mini,
 .app-shell[data-theme$="-dark"] .profile-mini { border-color: var(--color-rule); background-color: var(--color-paper-3); color: var(--color-ink); }
+.app-shell[data-theme="dark"] .trace-hero,
+.app-shell[data-theme="blue"] .trace-hero,
 .app-shell[data-theme$="-dark"] .trace-hero { background-color: var(--color-paper-2); }
+.app-shell[data-theme="dark"] .slab-os,
+.app-shell[data-theme="blue"] .slab-os,
 .app-shell[data-theme$="-dark"] .slab-os { background: var(--color-os); }
+.app-shell[data-theme="dark"] .slab-identity,
+.app-shell[data-theme="blue"] .slab-identity,
 .app-shell[data-theme$="-dark"] .slab-identity { background: var(--color-identity); }
+.app-shell[data-theme="dark"] .slab-db,
+.app-shell[data-theme="blue"] .slab-db,
 .app-shell[data-theme$="-dark"] .slab-db { background: var(--color-dbms); }
+.app-shell[data-theme="dark"] .trace-stage-foot,
+.app-shell[data-theme="blue"] .trace-stage-foot,
 .app-shell[data-theme$="-dark"] .trace-stage-foot { border-color: var(--color-rule); }
+.app-shell[data-theme="dark"] .event-row:hover,
+.app-shell[data-theme="blue"] .event-row:hover,
 .app-shell[data-theme$="-dark"] .event-row:hover,
+.app-shell[data-theme="dark"] .table-wrap tbody tr:hover,
+.app-shell[data-theme="blue"] .table-wrap tbody tr:hover,
 .app-shell[data-theme$="-dark"] .table-wrap tbody tr:hover { background: var(--color-paper-2); }
 
 .app-shell[data-theme="lagoon"] .surface-panel,
