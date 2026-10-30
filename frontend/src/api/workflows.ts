@@ -20,4 +20,7 @@ export const workflowsApi = {
   filesystemDetectionTest: <T>() => apiRequest<T>('/console/filesystem-test', { method: 'POST' }),
   runSqlCausality: <T>(query: string) => postJson<T>('/console/sql', { query }),
   realWorldEvaluation: <T>() => apiRequest<T>('/console/real-world'),
+  listTransactions: <T>(limit = 30) => apiRequest<T[]>(`/transactions?limit=${limit}`),
+  listLocks: <T>(limit = 40) => apiRequest<T[]>(`/locks?limit=${limit}`),
 };
+

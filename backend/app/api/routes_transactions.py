@@ -79,3 +79,54 @@ def rollback_transaction(transaction_id: int, service=Depends(get_transaction_se
         return {"transaction_id": transaction_id, "status": "ROLLED_BACK"}
     except (TransactionNotFoundError, TransactionStateError) as error:
         raise _state_error(error) from error
+
+
+@router.get("")
+def list_transactions(limit: int = 30) -> list[dict]:
+    """Return recent transactions with their PID, status, isolation level, and latest operation."""
+    items: list[dict] = []
+    try:
+        conn = get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                """
+                SELECT
+                    t.transaction_id,
+                    t.pid,
+                    t.status,
+                    t.isolation_level,
+                    t.start_time,
+                    t.end_time,
+                    COUNT(op.operation_id) AS op_count,
+                    MAX(op.operation_type) AS last_op_type,
+                    MAX(op.data_item) AS last_data_item
+                FROM transactions t
+                LEFT JOIN transaction_operations op ON op.transaction_id = t.transaction_id
+                GROUP BY t.transaction_id, t.pid, t.status, t.isolation_level, t.start_time, t.end_time
+                ORDER BY (t.status = 'ACTIVE') DESC, t.transaction_id DESC
+                LIMIT %s
+                """,
+                (max(1, min(limit, 100)),),
+            )
+            for row in cur.fetchall():
+                items.append(
+                    {
+                        "transaction_id": row["transaction_id"],
+                        "pid": row["pid"],
+                        "status": row["status"],
+                        "isolation_level": row.get("isolation_level") or "REPEATABLE_READ",
+                        "start_time": row["start_time"].isoformat() if hasattr(row.get("start_time"), "isoformat") else str(row.get("start_time") or ""),
+                        "end_time": row["end_time"].isoformat() if hasattr(row.get("end_time"), "isoformat") else None,
+                        "op_count": int(row.get("op_count") or 0),
+                        "last_op_type": row.get("last_op_type"),
+                        "last_data_item": row.get("last_data_item"),
+                    }
+                )
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return items
+

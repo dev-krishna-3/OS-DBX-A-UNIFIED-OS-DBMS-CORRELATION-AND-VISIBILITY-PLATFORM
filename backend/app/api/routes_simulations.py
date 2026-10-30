@@ -375,12 +375,35 @@ class DiskSchedulingRequest(BaseModel):
 
 @router.post("/disk")
 def run_disk_simulation(req: DiskSchedulingRequest) -> Dict[str, Any]:
-    """Run disk scheduling simulation and persist to disk_requests table."""
+    """Run disk scheduling simulation (FCFS, SSTF, SCAN, C-SCAN) and persist to disk_requests table."""
     current = req.initial_head
+    algo = (req.algorithm or "FCFS").upper().strip()
+    raw_tracks = [int(t) for t in req.tracks]
+
+    if algo == "SSTF":
+        remaining = list(raw_tracks)
+        ordered_tracks: List[int] = []
+        head_pos = current
+        while remaining:
+            closest = min(remaining, key=lambda x: (abs(x - head_pos), x))
+            ordered_tracks.append(closest)
+            remaining.remove(closest)
+            head_pos = closest
+    elif algo == "SCAN":
+        higher = sorted([t for t in raw_tracks if t >= current])
+        lower = sorted([t for t in raw_tracks if t < current], reverse=True)
+        ordered_tracks = higher + lower
+    elif algo in ("C-SCAN", "CSCAN"):
+        higher = sorted([t for t in raw_tracks if t >= current])
+        lower = sorted([t for t in raw_tracks if t < current])
+        ordered_tracks = higher + lower
+    else:
+        ordered_tracks = raw_tracks
+
     total_seek = 0
     sequence = []
-    
-    for idx, t in enumerate(req.tracks, 1):
+
+    for idx, t in enumerate(ordered_tracks, 1):
         seek = abs(t - current)
         total_seek += seek
         sequence.append({"order": idx, "track": t, "seek_time": seek})

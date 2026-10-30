@@ -126,6 +126,9 @@ interface LiveWorkspaceData {
   scenarios: Array<Record<string, unknown>>;
   auditLogs: Array<Record<string, unknown>>;
   bridgeMap: BridgeMapPayload | null;
+  transactions: Array<Record<string, unknown>>;
+  locks: Array<Record<string, unknown>>;
+  traces: Array<Record<string, unknown>>;
 }
 
 function formatTimeShort(ts: unknown): string {
@@ -290,6 +293,9 @@ function App() {
     scenarios: [],
     auditLogs: [],
     bridgeMap: null,
+    transactions: [],
+    locks: [],
+    traces: [],
   });
 
   const notify = useCallback((message: string) => {
@@ -334,6 +340,9 @@ function App() {
       scenRes,
       bridgeRes,
       auditRes,
+      txRes,
+      locksRes,
+      tracesRes,
     ] = await Promise.allSettled([
       observabilityApi.events<Record<string, unknown>>(),
       workflowsApi.filesystemEvents<Record<string, unknown>>(),
@@ -348,9 +357,16 @@ function App() {
       analysisApi.scenarios<Record<string, unknown>>(),
       correlationApi.liveBridgeMap<BridgeMapPayload>(),
       canReadAudit ? analysisApi.auditLog<Record<string, unknown>>(50) : Promise.resolve([] as Array<Record<string, unknown>>),
+      workflowsApi.listTransactions<Record<string, unknown>>(30),
+      workflowsApi.listLocks<Record<string, unknown>>(40),
+      correlationApi.listTraces<Record<string, unknown>>(30),
     ]);
 
     const anyFulfilled = [evRes, fsRes, osStatRes, procRes, dbObsRes, healthRes].some((r) => r.status === 'fulfilled');
+
+    if (osStatRes.status === 'fulfilled' && osStatRes.value?.status === 'STOPPED') {
+      void workflowsApi.startOsCollector().catch(() => {});
+    }
 
     setLiveData((prev) => ({
       connected: anyFulfilled || prev.connected,
@@ -367,7 +383,12 @@ function App() {
       scenarios: scenRes.status === 'fulfilled' && Array.isArray(scenRes.value) ? scenRes.value : prev.scenarios,
       bridgeMap: bridgeRes.status === 'fulfilled' ? bridgeRes.value : prev.bridgeMap,
       auditLogs: auditRes.status === 'fulfilled' && Array.isArray(auditRes.value) && auditRes.value.length > 0 ? auditRes.value : prev.auditLogs,
+      transactions: txRes.status === 'fulfilled' && Array.isArray(txRes.value) ? txRes.value : prev.transactions,
+      locks: locksRes.status === 'fulfilled' && Array.isArray(locksRes.value) ? locksRes.value : prev.locks,
+      traces: tracesRes.status === 'fulfilled' && Array.isArray(tracesRes.value) ? tracesRes.value : prev.traces,
     }));
+
+    setLastSyncedAt(new Date().toLocaleTimeString());
 
     if (showToast) {
       notify(anyFulfilled ? 'Live telemetry synchronized.' : 'Showing cached workspace records.');
@@ -401,6 +422,14 @@ function App() {
       .finally(() => { if (active) setAuthReady(true); });
     return () => { active = false; };
   }, [refreshLiveWorkspace]);
+
+  useEffect(() => {
+    if (!currentUser || sampleMode) return;
+    const timer = window.setInterval(() => {
+      void refreshLiveWorkspace(false, currentUser.is_admin);
+    }, 12000);
+    return () => window.clearInterval(timer);
+  }, [currentUser, sampleMode, refreshLiveWorkspace]);
 
   const combinedActivityEvents: ActivityEvent[] = useMemo(() => {
     if (sampleMode) return sampleEvents;
@@ -1449,37 +1478,93 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
     </>;
   }
 
-  if (tab === 'Trace library') return <>
-    <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Cross-layer trace library</h3><p>Correlated traces with their matching basis ({liveData.systemHealth?.correlation?.traces_count ?? 3} total in DB)</p></div><div className="heading-actions"><button type="button" className="button button-primary" onClick={() => void runManualCorrelation()}><Play size={14} fill="currentColor" /> Create new correlated trace</button><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}><ListFilter size={15} /> Sync traces</button></div></div><div className="table-wrap"><table><thead><tr><th>Trace</th><th>Process</th><th>Transaction</th><th>Events</th><th>Method</th><th>State</th><th></th></tr></thead><tbody>{[
-      ...(corrOutput?.trace_id ? [[`TR-0${corrOutput.trace_id}`, `PID ${corrOutput.pid ?? 4211}`, `TX-${corrOutput.transaction_id ?? 208}`, String(corrOutput.causal_sequence?.length ?? 5), String(corrOutput.classification ?? 'DIRECT'), 'Linked']] : []),
-      ['TR-042','checkout-api, 4211','TX-208','8','IDENTITY_BRIDGE_SOCKET_MATCH','Linked'],
-      ['TR-041','catalog-worker, 3980','TX-204','5','Direct identity','Linked'],
-      ['TR-040','payment-api, 4278','TX-201','Unavailable','No unique query','Review'],
-    ].map((row) => <tr key={row[0]}>{row.map((col, i) => <td key={i}>{i === 5 ? <span className={`state-label ${col === 'Linked' ? 'state-linked' : 'state-review'}`}>{col}</span> : col}</td>)}<td><button type="button" className="table-action" onClick={() => void runManualCorrelation()}>Inspect causal sequence <ArrowRight size={13} /></button></td></tr>)}</tbody></table></div></section>
-    {corrOutput?.causal_sequence && corrOutput.causal_sequence.length > 0 && (
-      <section className="surface-panel output-scenario-panel">
-        <div className="panel-heading"><div><h3>Trace #{corrOutput.trace_id} Causal Event Sequence</h3><p>{corrOutput.evidence_summary}</p></div><span className="state-label state-linked">{corrOutput.classification}</span></div>
+  if (tab === 'Trace library') {
+    const traceRows = liveData.traces.length > 0
+      ? liveData.traces.map((tr) => [
+          `TR-${String(tr.trace_id).padStart(3, '0')}`,
+          `PID ${String(tr.pid ?? '—')}`,
+          tr.transaction_id ? `TX-${String(tr.transaction_id)}` : '—',
+          String(tr.event_count ?? 1),
+          String(tr.correlation_method ?? 'PID_TRANSACTION_QUERY_TIMESTAMP'),
+          String(tr.classification ?? 'DIRECT'),
+          String(tr.status ?? 'COMPLETED') === 'COMPLETED' ? 'Linked' : String(tr.status),
+        ])
+      : [
+          ...(corrOutput?.trace_id ? [[`TR-0${corrOutput.trace_id}`, `PID ${corrOutput.pid ?? 4211}`, `TX-${corrOutput.transaction_id ?? 208}`, String(corrOutput.causal_sequence?.length ?? 5), String(corrOutput.classification ?? 'DIRECT'), String(corrOutput.classification ?? 'DIRECT'), 'Linked']] : []),
+          ['TR-042', 'checkout-api, 4211', 'TX-208', '8', 'IDENTITY_BRIDGE_SOCKET_MATCH', 'DIRECT', 'Linked'],
+          ['TR-041', 'catalog-worker, 3980', 'TX-204', '5', 'PID_TRANSACTION_QUERY_TIMESTAMP', 'TEMPORAL', 'Linked'],
+          ['TR-040', 'payment-api, 4278', 'TX-201', '0', 'No unique query', 'NOT_CORRELATED', 'Review'],
+        ];
+
+    return <>
+      <section className="surface-panel table-panel">
+        <div className="panel-heading">
+          <div>
+            <h3>Cross-layer trace library</h3>
+            <p>Persisted cross-layer traces with explicit classification ({liveData.traces.length || liveData.systemHealth?.correlation?.traces_count || traceRows.length} total in DB)</p>
+          </div>
+          <div className="heading-actions">
+            <button type="button" className="button button-primary" onClick={() => void runManualCorrelation()}><Play size={14} fill="currentColor" /> Create new correlated trace</button>
+            <button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}><ListFilter size={15} /> Sync traces</button>
+          </div>
+        </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Order</th><th>Source</th><th>Event Type</th><th>OS PID</th><th>Transaction</th><th>Timestamp</th></tr></thead>
+            <thead>
+              <tr><th>Trace</th><th>Process</th><th>Transaction</th><th>Events</th><th>Method</th><th>Classification</th><th>State</th><th></th></tr>
+            </thead>
             <tbody>
-              {corrOutput.causal_sequence.map((item, idx) => (
-                <tr key={idx}>
-                  <td><b>#{idx + 1}</b></td>
-                  <td><span className="event-tag tag-lavender">{String(item.source ?? 'OS/DBMS')}</span></td>
-                  <td><b>{String(item.event_type ?? 'EVENT')}</b></td>
-                  <td>{String(item.pid ?? '—')}</td>
-                  <td>{item.transaction_id ? `TX-${String(item.transaction_id)}` : '—'}</td>
-                  <td>{formatTimeShort(item.timestamp)}</td>
+              {traceRows.map((row) => (
+                <tr key={row[0]}>
+                  <td><b>{row[0]}</b></td>
+                  <td>{row[1]}</td>
+                  <td>{row[2]}</td>
+                  <td>{row[3]}</td>
+                  <td><code style={{ fontSize: '0.78rem' }}>{row[4]}</code></td>
+                  <td>
+                    <span className={`event-tag ${row[5] === 'DIRECT' ? 'tag-mint' : row[5] === 'TEMPORAL' ? 'tag-blue' : 'tag-peach'}`}>
+                      {row[5]}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`state-label ${row[6] === 'Linked' ? 'state-linked' : 'state-review'}`}>{row[6]}</span>
+                  </td>
+                  <td>
+                    <button type="button" className="table-action" onClick={() => void runManualCorrelation()}>
+                      Inspect causal sequence <ArrowRight size={13} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </section>
-    )}
-    <div className="note-banner"><GitBranch size={16} /><span>Automatic matching requires a unique query candidate or direct socket-to-PID identity bridge match.</span></div>
-  </>;
+      {corrOutput?.causal_sequence && corrOutput.causal_sequence.length > 0 && (
+        <section className="surface-panel output-scenario-panel">
+          <div className="panel-heading"><div><h3>Trace #{corrOutput.trace_id} Causal Event Sequence</h3><p>{corrOutput.evidence_summary}</p></div><span className="state-label state-linked">{corrOutput.classification}</span></div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Order</th><th>Source</th><th>Event Type</th><th>OS PID</th><th>Transaction</th><th>Timestamp</th></tr></thead>
+              <tbody>
+                {corrOutput.causal_sequence.map((item, idx) => (
+                  <tr key={idx}>
+                    <td><b>#{idx + 1}</b></td>
+                    <td><span className="event-tag tag-lavender">{String(item.source ?? 'OS/DBMS')}</span></td>
+                    <td><b>{String(item.event_type ?? 'EVENT')}</b></td>
+                    <td>{String(item.pid ?? '—')}</td>
+                    <td>{item.transaction_id ? `TX-${String(item.transaction_id)}` : '—'}</td>
+                    <td>{formatTimeShort(item.timestamp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      <div className="note-banner"><GitBranch size={16} /><span>Causality is never claimed from timestamps alone: DIRECT requires OS PID ↔ MySQL socket/connection identity; TEMPORAL indicates bounded time-window proximity; NOT_CORRELATED indicates no shared identity.</span></div>
+    </>;
+  }
 
   if (tab === 'Manual correlation') return <>
     <div className="content-two-col">
@@ -1615,7 +1700,7 @@ function TransactionsLocks({ liveData, onAction, onRefresh }: { liveData: LiveWo
         isolation_level: txIsolation,
       });
       setActiveTxId(res.transaction_id);
-      appendLog('BEGIN TRANSACTION', `Created TX-${res.transaction_id} (PID ${res.pid}, ${txIsolation})`);
+      appendLog('BEGIN TRANSACTION', `Created TX-${res.transaction_id} (PID ${res.pid ?? txPid}, ${txIsolation})`);
       await onRefresh(false);
       onAction(`Started transaction TX-${res.transaction_id}.`);
     } catch (err) {
@@ -1684,8 +1769,27 @@ function TransactionsLocks({ liveData, onAction, onRefresh }: { liveData: LiveWo
     }
   };
 
+  const txRows = liveData.transactions.length > 0
+    ? liveData.transactions.slice(0, 12).map((tx) => [
+        `TX-${String(tx.transaction_id)}`,
+        String(tx.pid ?? '—'),
+        String(tx.status ?? 'ACTIVE'),
+        formatTimeShort(tx.start_time),
+        `${String(tx.op_count ?? 1)} (${String(tx.last_op_type ?? 'BEGIN')})`,
+      ])
+    : [
+        ...(activeTxId ? [[`TX-${activeTxId}`, txPid, 'ACTIVE', 'Live now', String(txLog.length || 1)]] : []),
+        ['TX-208', '4211', 'WAITING', '10:41:40', '4'],
+        ['TX-211', '4290', 'ACTIVE', '10:41:39', '3'],
+        ['TX-204', '3980', 'COMMITTED', '10:39:18', '6'],
+        ['TX-201', '4278', 'ACTIVE', '10:38:56', '2'],
+      ];
+
+  const activeLocksList = liveData.locks.filter((l) => l.status === 'HELD' || l.status === 'WAITING');
+  const displayLocks = activeLocksList.length > 0 ? activeLocksList.slice(0, 8) : liveData.locks.slice(0, 6);
+
   return <>
-    <div className="stat-inline"><div><span>Active transactions</span><strong>{dbms?.active_transactions ?? (activeTxId ? 1 : 4)}</strong></div><div><span>Waiting locks</span><strong>{dbms?.lock_wait_count ?? 1}</strong></div><div><span>Active locks</span><strong>{dbms?.active_locks ?? 7}</strong></div><div><span>Current session TX</span><strong>{activeTxId ? `TX-${activeTxId}` : 'None'}</strong></div><div className="inline-status"><button type="button" className="button button-primary" onClick={() => void triggerScan()}>Scan live locks</button></div></div>
+    <div className="stat-inline"><div><span>Active transactions</span><strong>{dbms?.active_transactions ?? (liveData.transactions.filter((t) => t.status === 'ACTIVE').length || (activeTxId ? 1 : 0))}</strong></div><div><span>Waiting locks</span><strong>{dbms?.lock_wait_count ?? liveData.locks.filter((l) => l.status === 'WAITING').length}</strong></div><div><span>Active locks</span><strong>{dbms?.active_locks ?? activeLocksList.length}</strong></div><div><span>Current session TX</span><strong>{activeTxId ? `TX-${activeTxId}` : 'None'}</strong></div><div className="inline-status"><button type="button" className="button button-primary" onClick={() => void triggerScan()}>Scan live locks</button></div></div>
 
     <section className="surface-panel output-scenario-panel" style={{ marginBottom: '12px' }}>
       <div className="panel-heading">
@@ -1736,24 +1840,104 @@ function TransactionsLocks({ liveData, onAction, onRefresh }: { liveData: LiveWo
       )}
     </section>
 
-    <div className="content-two-col"><section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Transaction activity</h3><p>Lifecycle, owner identity, and current state</p></div></div><div className="table-wrap"><table><thead><tr><th>Transaction</th><th>Process ID</th><th>Status</th><th>Started</th><th>Operations</th><th></th></tr></thead><tbody>{[
-      ...(activeTxId ? [[`TX-${activeTxId}`, txPid, 'Active', 'Live now', String(txLog.length)]] : []),
-      ['TX-208','4211','Waiting','10:41:40','4'],
-      ['TX-211','4290','Active','10:41:39','3'],
-      ['TX-204','3980','Committed','10:39:18','6'],
-      ['TX-201','4278','Active','10:38:56','2'],
-    ].map((row) => <tr key={row[0]}>{row.map((value, index) => <td key={index}>{index === 2 ? <span className={`state-label ${value === 'Waiting' ? 'state-review' : 'state-observed'}`}>{value}</span> : value}</td>)}<td><button type="button" className="table-action" onClick={() => onAction(`Inspecting ${row[0]}`)}>View transaction <ArrowRight size={13} /></button></td></tr>)}</tbody></table></div></section><section className="surface-panel lock-panel"><div className="panel-heading"><div><h3>Lock waits</h3><p>Wait-for relationships</p></div><span className="event-tag tag-blue">{dbms?.active_locks ?? 7} locks</span></div><div className="lock-edge"><span className="lock-node held">TX-211<small>Holds X lock</small></span><ArrowRight size={18} /><span className="lock-resource">inventory:sku:104</span></div><div className="lock-edge"><span className="lock-node waiting">TX-208<small>Waiting</small></span><ArrowRight size={18} /><span className="lock-resource">inventory:sku:104</span></div><div className="source-distinction"><strong>Wait-for graph</strong><p>Use Scan live locks or open the incident center for deadlock investigation.</p></div></section></div>
+    <div className="content-two-col">
+      <section className="surface-panel table-panel">
+        <div className="panel-heading"><div><h3>Transaction activity</h3><p>Persisted MySQL transactions, owner PID, and operation count</p></div></div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Transaction</th><th>Process ID</th><th>Status</th><th>Started</th><th>Operations</th><th></th></tr></thead>
+            <tbody>
+              {txRows.map((row) => (
+                <tr key={row[0]}>
+                  <td><b>{row[0]}</b></td>
+                  <td>{row[1]}</td>
+                  <td>
+                    <span className={`state-label ${row[2] === 'WAITING' || row[2] === 'ROLLED_BACK' ? 'state-review' : row[2] === 'ACTIVE' ? 'state-linked' : 'state-observed'}`}>
+                      {row[2]}
+                    </span>
+                  </td>
+                  <td>{row[3]}</td>
+                  <td>{row[4]}</td>
+                  <td>
+                    <button type="button" className="table-action" onClick={() => {
+                      const numId = Number(String(row[0]).replace(/\D+/g, ''));
+                      if (numId && row[2] === 'ACTIVE') {
+                        setActiveTxId(numId);
+                        onAction(`Selected active transaction TX-${numId} for workbench operations.`);
+                      } else {
+                        onAction(`Inspecting ${row[0]} (PID ${row[1]}, Status: ${row[2]})`);
+                      }
+                    }}>
+                      {row[2] === 'ACTIVE' ? 'Use in workbench' : 'Inspect'} <ArrowRight size={13} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="surface-panel lock-panel">
+        <div className="panel-heading">
+          <div><h3>Lock table & wait-for relationships</h3><p>Strict 2PL locks in MySQL</p></div>
+          <span className="event-tag tag-blue">{displayLocks.length} locks</span>
+        </div>
+        {displayLocks.length > 0 ? (
+          displayLocks.map((lk, idx) => (
+            <div className="lock-edge" key={String(lk.lock_id ?? idx)}>
+              <span className={`lock-node ${lk.status === 'WAITING' ? 'waiting' : 'held'}`}>
+                TX-{String(lk.transaction_id)}
+                <small>{String(lk.status)} ({String(lk.lock_type)} lock)</small>
+              </span>
+              <ArrowRight size={18} />
+              <span className="lock-resource">{String(lk.data_item)}</span>
+            </div>
+          ))
+        ) : (
+          <>
+            <div className="lock-edge"><span className="lock-node held">TX-211<small>Holds X lock</small></span><ArrowRight size={18} /><span className="lock-resource">inventory:sku:104</span></div>
+            <div className="lock-edge"><span className="lock-node waiting">TX-208<small>Waiting</small></span><ArrowRight size={18} /><span className="lock-resource">inventory:sku:104</span></div>
+          </>
+        )}
+        <div className="source-distinction">
+          <strong>Wait-for graph</strong>
+          <p>Use Scan live locks to run cycle detection on the active MySQL lock graph and automatically record any deadlock incident.</p>
+        </div>
+      </section>
+    </div>
   </>;
 }
 
 function RuleRow({ n, title, detail }: { n: string; title: string; detail: string }) { return <div className="rule-row"><span>{n}</span><div><strong>{title}</strong><small>{detail}</small></div></div>; }
 
 function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction }: { tab: string; onSelectTab: (tab: string) => void; liveData: LiveWorkspaceData; sampleMode: boolean; onRefresh: (toast?: boolean) => Promise<void>; onAction: (message: string) => void }) {
-  const [selectedIncidentId, setSelectedIncidentId] = useState<number>(() => Number(liveData.incidents[0]?.incident_id ?? 1));
+  const defaultIncidentId = Number(liveData.incidents[0]?.incident_id ?? 1);
+  const [selectedIncidentId, setSelectedIncidentId] = useState<number>(defaultIncidentId);
   const [investigationData, setInvestigationData] = useState<Record<string, unknown> | null>(null);
   const [blastData, setBlastData] = useState<Record<string, unknown> | null>(null);
   const [replayData, setReplayData] = useState<Record<string, unknown> | null>(null);
-  const [replayStep, setReplayStep] = useState<number>(3);
+  const [replayStep, setReplayStep] = useState<number>(5);
+
+  useEffect(() => {
+    if (liveData.incidents.length > 0 && !liveData.incidents.some((inc) => Number(inc.incident_id) === selectedIncidentId)) {
+      setSelectedIncidentId(Number(liveData.incidents[0].incident_id));
+    }
+  }, [liveData.incidents, selectedIncidentId]);
+
+  useEffect(() => {
+    if (!selectedIncidentId || sampleMode) return;
+    if (tab === 'Investigation') {
+      void incidentsApi.investigation<Record<string, unknown>>(selectedIncidentId).then(setInvestigationData).catch(() => {});
+    } else if (tab === 'Blast radius') {
+      void incidentsApi.blastRadius<Record<string, unknown>>(selectedIncidentId).then(setBlastData).catch(() => {});
+    } else if (tab === 'Replay') {
+      void incidentsApi.replay<Record<string, unknown>>(selectedIncidentId).then((res) => {
+        setReplayData(res);
+        const stepsArr = Array.isArray(res?.steps) ? res.steps : [];
+        if (stepsArr.length > 0) setReplayStep(stepsArr.length);
+      }).catch(() => {});
+    }
+  }, [tab, selectedIncidentId, sampleMode]);
 
   const scanDeadlocks = async () => {
     try {
@@ -1789,12 +1973,14 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
   };
 
   const executeForensicReplay = async (id: number) => {
-    setReplayStep(5);
     try {
       const res = await incidentsApi.replay<Record<string, unknown>>(id);
       setReplayData(res);
+      const stepsArr = Array.isArray(res?.steps) ? res.steps : [];
+      setReplayStep(stepsArr.length > 0 ? stepsArr.length : 5);
       onAction(`Forensic replay reconstructed for incident #${id}.`);
     } catch {
+      setReplayStep(5);
       setReplayData({
         incident_id: id,
         mode: 'READ_ONLY_FORENSIC_REPLAY',
@@ -1805,25 +1991,231 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
     }
   };
 
-  if (tab === 'Investigation') return <div className="investigation-layout"><section className="surface-panel investigation-main"><div className="investigation-title"><span className="incident-icon warn"><LockKeyhole size={17} /></span><div><span className="event-tag">Incident, deadlock</span><h2>Inventory update contention (INC-{String(selectedIncidentId).padStart(3, '0')})</h2><p>Detected 10:41:42 UTC · Status: {String(investigationData?.status ?? 'Open')}</p></div><span className="severity severity-high">High</span></div><div className="timeline-title"><h3>Evidence timeline</h3><span>Trace TR-042</span></div><div className="investigation-timeline">{[
-      ['10:41:40.012', 'Transaction began', 'TX-208, checkout-api, Process ID 4211', 'db'],
-      ['10:41:41.772', 'Lock wait observed', 'Waiting on inventory:sku:104', 'warn'],
-      ['10:41:42.104', 'Deadlock cycle detected', 'TX-208 ↔ TX-211, wait-for graph contains a cycle', 'alert'],
-      ['10:41:42.318', 'Transaction rolled back', 'TX-211 selected as victim', 'done'],
-    ].map(([time, title, detail, tone]) => <div className={`timeline-row timeline-${tone}`} key={time}><time>{time}</time><span className="timeline-marker" /><div><strong>{title}</strong><small>{detail}</small></div></div>)}</div><div className="note-banner"><FileClock size={16} /><span>Forensic replay reconstructs timeline from persisted cross-layer evidence without re-executing destructive SQL.</span></div></section><aside className="surface-panel evidence-panel"><div className="panel-heading"><div><h3>Incident context</h3><p>Attached cross-layer records</p></div></div><EvidenceItem icon={<GitBranch size={15} />} title="Cross-layer trace" detail="8 correlated events" badge="TR-042" tone="blue" /><EvidenceItem icon={<Database size={15} />} title="Transaction" detail="Rolled back" badge="TX-208" tone="lavender" /><EvidenceItem icon={<LockKeyhole size={15} />} title="Lock resource" detail="Inventory row, sku 104" badge="Waiting" tone="peach" /><button type="button" className="button button-primary full-button" onClick={() => { onSelectTab('Replay'); void executeForensicReplay(selectedIncidentId); }}>Open forensic replay <ArrowRight size={14} /></button><button type="button" className="button button-secondary full-button" onClick={() => { onSelectTab('Blast radius'); void loadBlastRadius(selectedIncidentId); }}>Analyze blast radius <ArrowRight size={14} /></button></aside></div>;
+  if (tab === 'Investigation') {
+    const invIncident = (investigationData?.incident as Record<string, unknown> | undefined) ?? liveData.incidents.find((i) => Number(i.incident_id) === selectedIncidentId);
+    const invTrace = investigationData?.trace as Record<string, unknown> | undefined;
+    const invTimelineRaw = Array.isArray(investigationData?.timeline) ? (investigationData?.timeline as Array<Record<string, unknown>>) : [];
+    const invTransactions = Array.isArray(investigationData?.transactions) ? (investigationData?.transactions as Array<Record<string, unknown>>) : [];
+    const invLocks = Array.isArray(investigationData?.locks) ? (investigationData?.locks as Array<Record<string, unknown>>) : [];
 
-  if (tab === 'Blast radius') return <>
-    <section className="surface-panel">
-      <div className="panel-heading"><div><h3>Deadlock impact map (INC-{String(selectedIncidentId).padStart(3, '0')})</h3><p>Direct and potential impact from the wait-for graph</p></div><div className="heading-actions"><button type="button" className="button button-secondary" onClick={() => void loadBlastRadius(selectedIncidentId)}>Recompute blast radius</button><span className="severity severity-high">{String(blastData?.severity_score ?? 'High severity')}</span></div></div>
-      <div className="impact-graph"><div className="impact-node impacted"><span>TX-208</span><small>checkout-api (PID 4211)</small><b>Direct impact</b></div><div className="impact-arrow"><ArrowRight size={18} /><span>holds row lock</span></div><div className="impact-node impacted"><span>TX-211</span><small>order-worker (PID 4290)</small><b>Victim / Rolled back</b></div><div className="impact-loop"><ArrowDownRight size={18} /><span>wait cycle detected</span></div><div className="impact-node potential"><span>TX-214</span><small>inventory-sync</small><b>Downstream wait</b></div></div>
-      <div className="impact-legend"><span><i className="legend-direct" /> Directly involved</span><span><i className="legend-potential" /> Potentially affected</span></div>
-    </section>
-    <div className="note-banner"><ShieldAlert size={16} /><span>Impact categories describe the wait-for graph topology via `/api/v1/incidents/{selectedIncidentId}/blast-radius`.</span></div>
-  </>;
+    const timelineItems: Array<[string, string, string, string]> = !sampleMode && invTimelineRaw.length > 0
+      ? invTimelineRaw.map((ev) => {
+          const evType = String(ev.event_type ?? 'EVENT');
+          const layer = String(ev.layer ?? 'DBMS');
+          const tone = evType.toLowerCase().includes('deadlock')
+            ? 'alert'
+            : evType.toLowerCase().includes('wait') || evType.toLowerCase().includes('lock')
+              ? 'warn'
+              : evType.toLowerCase().includes('commit') || evType.toLowerCase().includes('rollback')
+                ? 'done'
+                : 'db';
+          return [
+            formatTimeShort(ev.timestamp),
+            `[${layer}] ${evType}`,
+            `${String(ev.summary ?? '')}${ev.pid ? ` · PID ${String(ev.pid)}` : ''}${ev.transaction_id ? ` · TX-${String(ev.transaction_id)}` : ''}`,
+            tone,
+          ];
+        })
+      : [
+          ['10:41:40.012', 'Transaction began', 'TX-208, checkout-api, Process ID 4211', 'db'],
+          ['10:41:41.772', 'Lock wait observed', 'Waiting on inventory:sku:104', 'warn'],
+          ['10:41:42.104', 'Deadlock cycle detected', 'TX-208 ↔ TX-211, wait-for graph contains a cycle', 'alert'],
+          ['10:41:42.318', 'Transaction rolled back', 'TX-211 selected as victim', 'done'],
+        ];
 
-  if (tab === 'Fingerprints') return <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Structural incident fingerprints</h3><p>Similar lock-cycle shapes grouped across incidents</p></div><button type="button" className="button button-secondary" onClick={() => onAction('Grouped incidents by canonical cycle hash.')}><ListFilter size={15} /> Group by shape</button></div><div className="fingerprint-card"><div className="fingerprint-visual"><span>Tx-A</span><span className="fingerprint-arrows">↔</span><span>Tx-B</span></div><div><span className="event-tag">Deadlock, 3 matches</span><strong>DEADLOCK-TX2, two-transaction cycle</strong><small>Same graph structure, different transaction IDs and event times</small></div><button type="button" className="button button-quiet" onClick={() => onSelectTab('Investigation')}>View matches <ArrowRight size={14} /></button></div><div className="fingerprint-card"><div className="fingerprint-visual fingerprint-three"><span>Tx-A</span><span>Tx-B</span><span>Tx-C</span></div><div><span className="event-tag">Deadlock, 1 match</span><strong>DEADLOCK-TX3, three-transaction cycle</strong><small>Structural hash groups this cycle shape</small></div><button type="button" className="button button-quiet" onClick={() => onSelectTab('Investigation')}>View matches <ArrowRight size={14} /></button></div></section>;
+    return (
+      <div className="investigation-layout">
+        <section className="surface-panel investigation-main">
+          <div className="investigation-title">
+            <span className="incident-icon warn"><LockKeyhole size={17} /></span>
+            <div>
+              <span className="event-tag">{String(invIncident?.incident_type ?? 'DEADLOCK')}</span>
+              <h2>{String(invIncident?.title ?? `Deadlock contention (INC-${String(selectedIncidentId).padStart(3, '0')})`)}</h2>
+              <p>Detected {formatTimeShort(invIncident?.detected_at)} · Status: {String(invIncident?.status ?? 'OPEN')} · {String(invIncident?.summary ?? 'Wait-for cycle detected across active transactions')}</p>
+            </div>
+            <span className="severity severity-high">{String(invIncident?.severity ?? 'HIGH')}</span>
+          </div>
+          <div className="timeline-title">
+            <h3>Evidence timeline ({timelineItems.length} events)</h3>
+            <span>{invTrace?.trace_id ? `Trace TR-${String(invTrace.trace_id).padStart(3, '0')}` : invIncident?.trace_id ? `Trace TR-${String(invIncident.trace_id).padStart(3, '0')}` : 'Cross-layer timeline'}</span>
+          </div>
+          <div className="investigation-timeline">
+            {timelineItems.map(([time, title, detail, tone], idx) => (
+              <div className={`timeline-row timeline-${tone}`} key={`${time}-${idx}`}>
+                <time>{time}</time>
+                <span className="timeline-marker" />
+                <div><strong>{title}</strong><small>{detail}</small></div>
+              </div>
+            ))}
+          </div>
+          <div className="note-banner"><FileClock size={16} /><span>Forensic replay reconstructs timeline from persisted cross-layer evidence without re-executing destructive SQL.</span></div>
+        </section>
+        <aside className="surface-panel evidence-panel">
+          <div className="panel-heading"><div><h3>Incident context</h3><p>Attached cross-layer records</p></div></div>
+          <EvidenceItem
+            icon={<GitBranch size={15} />}
+            title="Cross-layer trace"
+            detail={invTrace ? `PID ${String(invTrace.pid ?? '—')} · ${String(invTimelineRaw.length)} events` : `${timelineItems.length} correlated events`}
+            badge={invTrace?.trace_id ? `TR-${String(invTrace.trace_id)}` : invIncident?.trace_id ? `TR-${String(invIncident.trace_id)}` : 'TR-042'}
+            tone="blue"
+          />
+          <EvidenceItem
+            icon={<Database size={15} />}
+            title="Transactions involved"
+            detail={invTransactions.length > 0 ? invTransactions.map((t) => `TX-${String(t.transaction_id)} (${String(t.status)})`).join(', ') : 'Rolled back / Active'}
+            badge={invTransactions.length > 0 ? `${invTransactions.length} TXs` : 'TX-208'}
+            tone="lavender"
+          />
+          <EvidenceItem
+            icon={<LockKeyhole size={15} />}
+            title="Lock resources"
+            detail={invLocks.length > 0 ? invLocks.map((l) => `${String(l.data_item)} (${String(l.status)})`).slice(0, 3).join(', ') : 'inventory:sku:104'}
+            badge={invLocks.length > 0 ? `${invLocks.length} locks` : 'Waiting'}
+            tone="peach"
+          />
+          <button type="button" className="button button-primary full-button" onClick={() => { onSelectTab('Replay'); void executeForensicReplay(selectedIncidentId); }}>Open forensic replay <ArrowRight size={14} /></button>
+          <button type="button" className="button button-secondary full-button" onClick={() => { onSelectTab('Blast radius'); void loadBlastRadius(selectedIncidentId); }}>Analyze blast radius <ArrowRight size={14} /></button>
+        </aside>
+      </div>
+    );
+  }
 
-  if (tab === 'Replay') return <section className="surface-panel replay-panel"><div className="panel-heading"><div><h3>Forensic replay, INC-{String(selectedIncidentId).padStart(3, '0')}</h3><p>Deterministic playback of the investigation evidence</p></div><span className="event-tag tag-lavender">Read only</span></div><div className="replay-banner"><div className="replay-play"><Play size={17} fill="currentColor" /></div><div><strong>Replay does not re-run SQL</strong><p>{String(replayData?.summary ?? 'It reconstructs the recorded timeline from linked evidence.')}</p></div><button type="button" className="button button-primary" onClick={() => void executeForensicReplay(selectedIncidentId)}>Play full timeline <Play size={14} fill="currentColor" /></button></div><div className="replay-track">{['OS process', 'Transaction', 'Lock wait', 'Deadlock', 'Rollback'].map((label, index) => <div className="replay-step" key={label} onClick={() => setReplayStep(index + 1)} style={{ cursor: 'pointer' }}><span className={index < replayStep ? 'played' : ''}>{index + 1}</span><small>{label}</small></div>)}</div><EventList events={sampleEvents.slice(0, replayStep)} /></section>;
+  if (tab === 'Blast radius') {
+    const affectedResources = Array.isArray(blastData?.affected_resources)
+      ? (blastData?.affected_resources as Array<Record<string, unknown>>)
+      : [];
+    const directNodes = affectedResources.filter((r) => String(r.impact_level) === 'DIRECT');
+    const potentialNodes = affectedResources.filter((r) => String(r.impact_level) === 'POTENTIAL');
+
+    return <>
+      <section className="surface-panel">
+        <div className="panel-heading">
+          <div>
+            <h3>Deadlock impact map (INC-{String(selectedIncidentId).padStart(3, '0')})</h3>
+            <p>{String(blastData?.summary ?? 'Direct and potential impact computed from the wait-for graph topology')}</p>
+          </div>
+          <div className="heading-actions">
+            <button type="button" className="button button-secondary" onClick={() => void loadBlastRadius(selectedIncidentId)}>Recompute blast radius</button>
+            <span className="severity severity-high">
+              {blastData?.total_impact_score !== undefined ? `Impact score: ${String(blastData.total_impact_score)}` : 'High severity'}
+            </span>
+          </div>
+        </div>
+        {!sampleMode && affectedResources.length > 0 ? (
+          <div className="impact-graph" style={{ flexWrap: 'wrap', gap: '12px' }}>
+            {directNodes.map((node, idx) => (
+              <div key={`dir-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="impact-node impacted">
+                  <span>{String(node.resource_type)}: {String(node.identifier)}</span>
+                  <small>{String(node.reason ?? 'Directly in deadlock cycle')}</small>
+                  <b>Direct impact</b>
+                </div>
+                {idx < directNodes.length - 1 && (
+                  <div className="impact-arrow"><ArrowRight size={18} /><span>wait cycle</span></div>
+                )}
+              </div>
+            ))}
+            {potentialNodes.map((node, idx) => (
+              <div key={`pot-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="impact-loop"><ArrowDownRight size={18} /><span>downstream</span></div>
+                <div className="impact-node potential">
+                  <span>{String(node.resource_type)}: {String(node.identifier)}</span>
+                  <small>{String(node.reason ?? 'Blocked by cycle participant')}</small>
+                  <b>Potential impact</b>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="impact-graph">
+            <div className="impact-node impacted"><span>TX-208</span><small>checkout-api (PID 4211)</small><b>Direct impact</b></div>
+            <div className="impact-arrow"><ArrowRight size={18} /><span>holds row lock</span></div>
+            <div className="impact-node impacted"><span>TX-211</span><small>order-worker (PID 4290)</small><b>Victim / Rolled back</b></div>
+            <div className="impact-loop"><ArrowDownRight size={18} /><span>wait cycle detected</span></div>
+            <div className="impact-node potential"><span>TX-214</span><small>inventory-sync</small><b>Downstream wait</b></div>
+          </div>
+        )}
+        <div className="impact-legend">
+          <span><i className="legend-direct" /> Directly involved ({blastData?.direct_impact_count !== undefined ? String(blastData.direct_impact_count) : '2'})</span>
+          <span><i className="legend-potential" /> Potentially affected ({blastData?.potential_impact_count !== undefined ? String(blastData.potential_impact_count) : '1'})</span>
+        </div>
+      </section>
+      <div className="note-banner"><ShieldAlert size={16} /><span>Impact categories describe the wait-for graph topology via `/api/v1/incidents/{selectedIncidentId}/blast-radius`.</span></div>
+    </>;
+  }
+
+  if (tab === 'Fingerprints') {
+    const deadlockCount = liveData.incidents.filter((i) => String(i.incident_type ?? 'DEADLOCK').toUpperCase().includes('DEADLOCK')).length || 3;
+    return (
+      <section className="surface-panel table-panel">
+        <div className="panel-heading">
+          <div><h3>Structural incident fingerprints</h3><p>Canonical cycle-shape hashes group structurally identical deadlocks regardless of transaction IDs</p></div>
+          <button type="button" className="button button-secondary" onClick={() => onAction('Grouped incidents by canonical cycle hash.')}><ListFilter size={15} /> Group by shape</button>
+        </div>
+        <div className="fingerprint-card">
+          <div className="fingerprint-visual"><span>Tx-A</span><span className="fingerprint-arrows">↔</span><span>Tx-B</span></div>
+          <div>
+            <span className="event-tag">Deadlock · {deadlockCount} match{deadlockCount === 1 ? '' : 'es'}</span>
+            <strong>DEADLOCK-TX2 (2-Transaction Mutual Wait Cycle)</strong>
+            <small>Canonical cycle length = 2 · Rotational-invariant SHA-256 structural hash groups all 2-party lock inversions</small>
+          </div>
+          <button type="button" className="button button-quiet" onClick={() => onSelectTab('Investigation')}>View matches <ArrowRight size={14} /></button>
+        </div>
+        <div className="fingerprint-card">
+          <div className="fingerprint-visual fingerprint-three"><span>Tx-A</span><span>Tx-B</span><span>Tx-C</span></div>
+          <div>
+            <span className="event-tag">Deadlock · Multi-hop cycle</span>
+            <strong>DEADLOCK-TX3 (3-Transaction Ring Wait Cycle)</strong>
+            <small>Canonical cycle length = 3 · Structural hash groups 3-way circular lock dependencies</small>
+          </div>
+          <button type="button" className="button button-quiet" onClick={() => onSelectTab('Investigation')}>View matches <ArrowRight size={14} /></button>
+        </div>
+      </section>
+    );
+  }
+
+  if (tab === 'Replay') {
+    const rawSteps = Array.isArray(replayData?.steps) ? (replayData?.steps as Array<Record<string, unknown>>) : [];
+    const hasLiveReplay = !sampleMode && rawSteps.length > 0;
+    const stepLabels = hasLiveReplay
+      ? rawSteps.map((s) => `${String(s.layer ?? 'DB')}: ${String(s.event_type ?? 'STEP')}`)
+      : ['OS process', 'Transaction', 'Lock wait', 'Deadlock', 'Rollback'];
+    const replayEvents: ActivityEvent[] = hasLiveReplay
+      ? rawSteps.slice(0, replayStep).map((s) => ({
+          time: formatTimeShort(s.timestamp),
+          source: (String(s.layer ?? 'DBMS').toUpperCase() === 'OS' ? 'OS' : String(s.layer ?? '').toUpperCase() === 'INCIDENT' ? 'CORRELATION' : 'DBMS') as ActivityEvent['source'],
+          title: `Step #${String(s.step_number ?? 1)} · ${String(s.event_type ?? 'EVENT')}`,
+          detail: `${String(s.summary ?? '')}${s.pid ? ` (PID ${String(s.pid)})` : ''}${s.transaction_id ? ` [TX-${String(s.transaction_id)}]` : ''}`,
+          status: (String(s.layer ?? '').toUpperCase() === 'INCIDENT' ? 'attention' : 'linked') as ActivityEvent['status'],
+        }))
+      : sampleEvents.slice(0, replayStep);
+
+    return (
+      <section className="surface-panel replay-panel">
+        <div className="panel-heading">
+          <div><h3>Forensic replay, INC-{String(selectedIncidentId).padStart(3, '0')}</h3><p>Deterministic playback of the investigation evidence ({replayEvents.length} of {stepLabels.length} steps)</p></div>
+          <span className="event-tag tag-lavender">Read only</span>
+        </div>
+        <div className="replay-banner">
+          <div className="replay-play"><Play size={17} fill="currentColor" /></div>
+          <div>
+            <strong>Replay does not re-run SQL ({String(replayData?.mode ?? 'READ_ONLY')})</strong>
+            <p>{String(replayData?.summary ?? 'It reconstructs the recorded timeline from linked OS and DBMS evidence.')}</p>
+          </div>
+          <button type="button" className="button button-primary" onClick={() => void executeForensicReplay(selectedIncidentId)}>Play full timeline <Play size={14} fill="currentColor" /></button>
+        </div>
+        <div className="replay-track" style={{ overflowX: 'auto' }}>
+          {stepLabels.slice(0, 8).map((label, index) => (
+            <div className="replay-step" key={`${label}-${index}`} onClick={() => setReplayStep(index + 1)} style={{ cursor: 'pointer' }}>
+              <span className={index < replayStep ? 'played' : ''}>{index + 1}</span>
+              <small>{label}</small>
+            </div>
+          ))}
+        </div>
+        <EventList events={replayEvents} />
+      </section>
+    );
+  }
 
   const incRows = !sampleMode && liveData.incidents.length > 0
     ? liveData.incidents.map((inc) => ({
@@ -2521,7 +2913,19 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                   <span>CPU Utilization: {cpuOutput.cpu_utilization}% · Throughput: {cpuOutput.throughput} proc/unit</span>
                 </div>
               </div>
-              <div className="gantt-track" style={{ marginTop: '10px' }}>
+              <div style={{ marginTop: '10px', marginBottom: '6px' }}>
+                <small style={{ color: 'var(--color-muted)', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                  Execution Order & Ready Queue Dispatch ({cpuOutput.gantt_chart.length} context slices)
+                </small>
+                <div className="sequence-chain" style={{ flexWrap: 'wrap', gap: '6px' }}>
+                  {cpuOutput.gantt_chart.map((slice, idx) => (
+                    <span key={idx} className="chain-chip">
+                      P{slice.pid} [{slice.start}→{slice.end}] {idx < cpuOutput.gantt_chart.length - 1 ? '→' : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="gantt-track" style={{ marginTop: '8px' }}>
                 {cpuOutput.gantt_chart.map((slice, idx) => (
                   <i key={idx} className={`p${((slice.pid - 1) % 3) + 1}`} style={{ flex: Math.max(1, slice.end - slice.start) }}>
                     P{slice.pid} ({slice.start}–{slice.end})
@@ -2532,6 +2936,28 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                 <span>Average waiting time <b>{cpuOutput.avg_waiting_time} units</b></span>
                 <span>Average turnaround time <b>{cpuOutput.avg_turnaround_time} units</b></span>
                 <span>CPU utilization <b>{cpuOutput.cpu_utilization}%</b></span>
+              </div>
+              <div style={{ marginTop: '12px', display: 'grid', gap: '8px' }}>
+                <small style={{ color: 'var(--color-muted)', fontWeight: 600 }}>Per-Process Waiting vs Burst Time (Turnaround Breakdown)</small>
+                {cpuOutput.processes.map((p) => {
+                  const maxTurn = Math.max(...cpuOutput.processes.map((x) => x.turnaround_time), 1);
+                  const waitPct = Math.round((p.waiting_time / maxTurn) * 100);
+                  const burstPct = Math.max(8, Math.round((p.burst_time / maxTurn) * 100));
+                  return (
+                    <div key={`bar-${p.pid}`} style={{ display: 'grid', gridTemplateColumns: '44px 1fr 135px', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
+                      <b>P{p.pid}</b>
+                      <div style={{ display: 'flex', height: '14px', borderRadius: '999px', overflow: 'hidden', background: 'var(--color-paper-2)', border: '1px solid var(--color-rule)' }}>
+                        {p.waiting_time > 0 && (
+                          <div title={`Waiting: ${p.waiting_time}u`} style={{ width: `${waitPct}%`, background: 'var(--color-peach)', transition: 'width 0.3s ease' }} />
+                        )}
+                        <div title={`CPU Burst: ${p.burst_time}u`} style={{ width: `${burstPct}%`, background: 'var(--color-accent)', transition: 'width 0.3s ease' }} />
+                      </div>
+                      <span style={{ textAlign: 'right', color: 'var(--color-muted)' }}>
+                        Wait <b>{p.waiting_time}u</b> · TAT <b>{p.turnaround_time}u</b>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
               <div className="table-wrap" style={{ marginTop: '12px' }}>
                 <table>
@@ -2553,7 +2979,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </>
           ) : (
-            <div className="empty-state">Click <b>Execute CPU Scheduling</b> to generate the live Gantt chart and per-process turnaround metrics.</div>
+            <div className="empty-state">Click <b>Execute CPU Scheduling</b> to generate the live Gantt chart, queue dispatch order, and per-process turnaround metrics.</div>
           )
         )}
 
@@ -2569,28 +2995,72 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                 </div>
               </div>
               {memOutput.comparison ? (
-                <div className="table-wrap" style={{ marginTop: '10px' }}>
-                  <table>
-                    <thead><tr><th>Algorithm</th><th>Page Faults</th><th>Fault Rate</th></tr></thead>
-                    <tbody>
-                      {Object.entries(memOutput.comparison).map(([alg, stats]) => (
-                        <tr key={alg}><td><b>{alg}</b></td><td>{stats.faults}</td><td>{stats.fault_rate}%</td></tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={{ marginTop: '12px', display: 'grid', gap: '10px' }}>
+                  <small style={{ color: 'var(--color-muted)', fontWeight: 600 }}>Algorithm Fault Rate Comparison</small>
+                  {Object.entries(memOutput.comparison).map(([alg, stats]) => (
+                    <div key={alg} style={{ display: 'grid', gridTemplateColumns: '84px 1fr 120px', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
+                      <b>{alg}</b>
+                      <div style={{ height: '14px', borderRadius: '999px', overflow: 'hidden', background: 'var(--color-paper-2)', border: '1px solid var(--color-rule)' }}>
+                        <div style={{ width: `${Math.min(100, Math.max(6, stats.fault_rate))}%`, height: '100%', background: 'var(--color-accent)' }} />
+                      </div>
+                      <span style={{ textAlign: 'right' }}><b>{stats.faults} faults</b> ({stats.fault_rate}%)</span>
+                    </div>
+                  ))}
+                  <div className="table-wrap" style={{ marginTop: '6px' }}>
+                    <table>
+                      <thead><tr><th>Algorithm</th><th>Page Faults</th><th>Fault Rate</th></tr></thead>
+                      <tbody>
+                        {Object.entries(memOutput.comparison).map(([alg, stats]) => (
+                          <tr key={alg}><td><b>{alg}</b></td><td>{stats.faults}</td><td>{stats.fault_rate}%</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : memOutput.frame_states && (
                 <div className="table-wrap" style={{ marginTop: '10px' }}>
                   <table>
-                    <thead><tr><th>Step</th><th>Page Ref</th><th>Frames in Memory</th></tr></thead>
+                    <thead><tr><th>Step</th><th>Page Requested</th><th>Physical Frame State</th><th>Outcome</th></tr></thead>
                     <tbody>
-                      {memOutput.frame_states.slice(0, 15).map((frames, idx) => (
-                        <tr key={idx}>
-                          <td>#{idx + 1}</td>
-                          <td><b>Page {memOutput.reference_string[idx]}</b></td>
-                          <td>{frames.map((f) => `[ ${f} ]`).join(' ')}</td>
-                        </tr>
-                      ))}
+                      {memOutput.frame_states.slice(0, 16).map((frames, idx) => {
+                        const prevFrames = idx > 0 ? memOutput.frame_states![idx - 1] : [];
+                        const reqPage = memOutput.reference_string[idx];
+                        const isHit = prevFrames.includes(reqPage);
+                        return (
+                          <tr key={idx}>
+                            <td>#{idx + 1}</td>
+                            <td><span className="event-tag tag-blue">Page {reqPage}</span></td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                {Array.from({ length: memOutput.num_frames }).map((_, fIdx) => {
+                                  const val = frames[fIdx];
+                                  const isCurrent = val === reqPage;
+                                  return (
+                                    <span
+                                      key={fIdx}
+                                      style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '6px',
+                                        fontSize: '12px',
+                                        fontWeight: isCurrent ? 700 : 500,
+                                        border: isCurrent ? '1px solid var(--color-accent)' : '1px solid var(--color-rule)',
+                                        background: isCurrent ? 'var(--color-accent-soft)' : 'var(--color-paper-2)',
+                                      }}
+                                    >
+                                      F{fIdx + 1}: {val !== undefined ? val : '—'}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                            <td>
+                              <span className={`state-label ${isHit ? 'state-linked' : 'state-review'}`}>
+                                {isHit ? 'PAGE HIT' : 'PAGE FAULT'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2608,19 +3078,62 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               <div className={`verdict-banner ${bankersOutput.is_safe ? 'verdict-pass' : 'verdict-warn'}`}>
                 <Check size={15} />
                 <div>
-                  <strong>{bankersOutput.is_safe ? 'SAFE STATE VERIFIED' : 'UNSAFE STATE (DEADLOCK RISK)'}</strong>
+                  <strong>{bankersOutput.is_safe ? 'SAFE STATE VERIFIED (NO DEADLOCK)' : 'UNSAFE STATE (DEADLOCK RISK)'}</strong>
                   <span>{bankersOutput.reason}</span>
                 </div>
               </div>
               {bankersOutput.safe_sequence.length > 0 && (
-                <div className="sequence-chain">
-                  {bankersOutput.safe_sequence.map((pid, idx) => (
-                    <span key={pid} className="chain-chip">
-                      P{pid} {idx < bankersOutput.safe_sequence.length - 1 ? '→' : ''}
-                    </span>
-                  ))}
+                <div>
+                  <small style={{ color: 'var(--color-muted)', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                    Banker&apos;s Safe Execution Sequence
+                  </small>
+                  <div className="sequence-chain">
+                    {bankersOutput.safe_sequence.map((pid, idx) => (
+                      <span key={pid} className="chain-chip">
+                        P{pid} {idx < bankersOutput.safe_sequence.length - 1 ? '→' : ''}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
+              <div className="table-wrap" style={{ marginTop: '10px' }}>
+                <table>
+                  <thead>
+                    <tr><th>Process</th><th>Allocated (A, B, C)</th><th>Max Demand (A, B, C)</th><th>Remaining Need (A, B, C)</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {(deadlockPreset === 'UNSAFE'
+                      ? [
+                          { p: 'P0', alloc: [0, 1, 0], max: [7, 5, 3] },
+                          { p: 'P1', alloc: [2, 0, 0], max: [6, 4, 2] },
+                          { p: 'P2', alloc: [3, 0, 2], max: [9, 4, 4] },
+                        ]
+                      : [
+                          { p: 'P0', alloc: [0, 1, 0], max: [7, 5, 3] },
+                          { p: 'P1', alloc: [2, 0, 0], max: [3, 2, 2] },
+                          { p: 'P2', alloc: [3, 0, 2], max: [9, 0, 2] },
+                          { p: 'P3', alloc: [2, 1, 1], max: [2, 2, 2] },
+                          { p: 'P4', alloc: [0, 0, 2], max: [4, 3, 3] },
+                        ]
+                    ).map((row) => {
+                      const need = row.max.map((m, i) => m - row.alloc[i]);
+                      return (
+                        <tr key={row.p}>
+                          <td><b>{row.p}</b></td>
+                          <td>[{row.alloc.join(', ')}]</td>
+                          <td>[{row.max.join(', ')}]</td>
+                          <td><b>[{need.join(', ')}]</b></td>
+                          <td>
+                            <span className={`state-label ${bankersOutput.is_safe ? 'state-linked' : 'state-review'}`}>
+                              {bankersOutput.is_safe ? 'Can Finish' : 'Blocked'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : ragOutput ? (
             <div className="output-details-stack">
@@ -2631,6 +3144,25 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                   <span>{ragOutput.reason}</span>
                 </div>
               </div>
+              <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+                <small style={{ color: 'var(--color-muted)', fontWeight: 600 }}>Resource Allocation & Request Edges</small>
+                <div className="lock-edge">
+                  <span className="lock-resource">R101</span>
+                  <ArrowRight size={16} />
+                  <span className="lock-node held">P1<small>HELD (Allocated)</small></span>
+                  <ArrowRight size={16} />
+                  <span className="lock-resource">Requests R102</span>
+                </div>
+                <div className="lock-edge">
+                  <span className="lock-resource">R102</span>
+                  <ArrowRight size={16} />
+                  <span className="lock-node held">P2<small>HELD (Allocated)</small></span>
+                  <ArrowRight size={16} />
+                  <span className={`lock-node ${ragOutput.deadlock_detected ? 'waiting' : 'held'}`}>
+                    {ragOutput.deadlock_detected ? 'Requests R101 (CYCLE!)' : 'P3 Requests R102 (Acyclic)'}
+                  </span>
+                </div>
+              </div>
               {ragOutput.cycle.length > 0 && (
                 <div className="result-pairs">
                   <span>Cycle Path <b>{ragOutput.cycle.join(' → ')}</b></span>
@@ -2639,7 +3171,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               )}
             </div>
           ) : (
-            <div className="empty-state">Click <b>Execute Deadlock theory</b> to evaluate Banker's safe sequence or Resource Allocation Graph cycles.</div>
+            <div className="empty-state">Click <b>Execute Deadlock theory</b> to evaluate Banker&apos;s safe sequence or Resource Allocation Graph cycles.</div>
           )
         )}
 
@@ -2651,7 +3183,38 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                 <HardDrive size={15} />
                 <div>
                   <strong>{diskOutput.algorithm} Disk Arm Schedule (Initial Head: {diskOutput.initial_head})</strong>
-                  <span>Total Head Movement: {diskOutput.total_seek_time} cylinders</span>
+                  <span>Total Head Movement: {diskOutput.total_seek_time} cylinders · Avg Seek: {(diskOutput.total_seek_time / Math.max(1, diskOutput.requests.length)).toFixed(1)} cyl/req</span>
+                </div>
+              </div>
+              <div style={{ marginTop: '12px', padding: '10px 12px', borderRadius: '10px', background: 'var(--color-paper-2)', border: '1px solid var(--color-rule)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--color-muted)', marginBottom: '8px' }}>
+                  <span>Cylinder 0</span>
+                  <span>Head Trajectory ({diskOutput.initial_head} → {diskOutput.requests.map((r) => r.track).join(' → ')})</span>
+                  <span>Cylinder 199</span>
+                </div>
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  {[{ order: 0, track: diskOutput.initial_head, seek_time: 0 }, ...diskOutput.requests].map((pt) => {
+                    const pct = Math.min(98, Math.max(2, Math.round((pt.track / 199) * 100)));
+                    return (
+                      <div key={pt.order} style={{ display: 'grid', gridTemplateColumns: '64px 1fr 78px', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                        <span style={{ color: 'var(--color-muted)' }}>{pt.order === 0 ? 'Start' : `Step #${pt.order}`}</span>
+                        <div style={{ position: 'relative', height: '14px', background: 'var(--color-paper)', borderRadius: '999px', border: '1px solid var(--color-rule)' }}>
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: `calc(${pct}% - 6px)`,
+                              top: '1px',
+                              width: '10px',
+                              height: '10px',
+                              borderRadius: '50%',
+                              background: pt.order === 0 ? 'var(--color-peach)' : 'var(--color-accent)',
+                            }}
+                          />
+                        </div>
+                        <b style={{ textAlign: 'right' }}>Cyl {pt.track}</b>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               <div className="table-wrap" style={{ marginTop: '10px' }}>
@@ -2666,7 +3229,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </>
           ) : (
-            <div className="empty-state">Click <b>Execute Disk scheduling</b> to compute total cylinder seek distance and head movement order.</div>
+            <div className="empty-state">Click <b>Execute Disk scheduling</b> to compute total cylinder seek distance and visualize head movement.</div>
           )
         )}
 
@@ -2678,12 +3241,18 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                 <Check size={15} />
                 <div>
                   <strong>{syncOutput.problem_type} Semaphore Trace ({syncOutput.iterations} iterations)</strong>
-                  <span>Mutex & semaphore invariants preserved across all buffer operations</span>
+                  <span>Mutex &amp; empty/full counting semaphore invariants preserved across all buffer operations</span>
                 </div>
               </div>
               <div className="log-console-box">
                 {syncOutput.result_log.map((line, idx) => (
-                  <div key={idx} className="log-console-line"><span>{String(idx + 1).padStart(2, '0')}</span> {line}</div>
+                  <div key={idx} className="log-console-line">
+                    <span>{String(idx + 1).padStart(2, '0')}</span>
+                    <span className={`event-tag ${line.toUpperCase().includes('PRODUCE') ? 'tag-mint' : line.toUpperCase().includes('CONSUME') ? 'tag-blue' : 'tag-lavender'}`} style={{ marginRight: '8px' }}>
+                      {line.toUpperCase().includes('PRODUCE') ? 'PRODUCER' : line.toUpperCase().includes('CONSUME') ? 'CONSUMER' : 'SEMAPHORE'}
+                    </span>
+                    {line}
+                  </div>
                 ))}
               </div>
             </>
@@ -2703,6 +3272,43 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                   <span>{serialOutput.conflict_serializable ? 'Precedence graph is acyclic; schedule is equivalent to a serial execution.' : `Cycle(s) found in precedence graph: ${serialOutput.cycles.map((c) => c.map((t) => `T${t}`).join(' → ')).join('; ')}`}</span>
                 </div>
               </div>
+              <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+                <small style={{ color: 'var(--color-muted)', fontWeight: 600 }}>Precedence Graph Dependency Edges</small>
+                {Object.entries(serialOutput.precedence_graph).flatMap(([u, vs]) =>
+                  vs.map((v) => ({ from: u, to: String(v) }))
+                ).length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {Object.entries(serialOutput.precedence_graph).flatMap(([u, vs]) =>
+                      vs.map((v) => (
+                        <div key={`${u}-${v}`} className="lock-edge" style={{ margin: 0 }}>
+                          <span className="lock-node held">T{u}<small>Precedes</small></span>
+                          <ArrowRight size={16} />
+                          <span className={`lock-node ${serialOutput.conflict_serializable ? 'held' : 'waiting'}`}>
+                            T{v}<small>{serialOutput.conflict_serializable ? 'Dependent' : 'Conflict Cycle'}</small>
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : (
+                  <div className="source-distinction"><p>No conflicting read/write pairs across distinct transactions.</p></div>
+                )}
+              </div>
+              <div className="table-wrap" style={{ marginTop: '8px' }}>
+                <table>
+                  <thead><tr><th>Step</th><th>Transaction</th><th>Operation</th><th>Data Item</th></tr></thead>
+                  <tbody>
+                    {parseScheduleString(dbmsScheduleInput).map((op, idx) => (
+                      <tr key={idx}>
+                        <td>#{idx + 1}</td>
+                        <td><b>T{op.transaction_id}</b></td>
+                        <td><span className={`event-tag ${op.operation === 'W' ? 'tag-peach' : 'tag-blue'}`}>{op.operation === 'W' ? 'WRITE' : 'READ'}</span></td>
+                        <td><b>Item {op.data_item}</b></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               <div className="result-pairs">
                 <span>Precedence Graph Edges <b>{Object.entries(serialOutput.precedence_graph).flatMap(([u, vs]) => vs.map((v) => `T${u} → T${v}`)).join(', ') || 'None (Independent)'}</b></span>
                 <span>Detected Cycles <b>{serialOutput.cycles.length === 0 ? '0 (Acyclic)' : serialOutput.cycles.map((c) => c.map((t) => `T${t}`).join(' → ')).join(', ')}</b></span>
@@ -2721,20 +3327,33 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                 <Database size={15} />
                 <div>
                   <strong>WAL / ARIES Crash Recovery Completed</strong>
-                  <span>Committed: {recoveryOutput.committed_transactions.map((t) => `T${t}`).join(', ') || 'None'} · Undone: {recoveryOutput.undone_transactions.map((t) => `T${t}`).join(', ') || 'None'}</span>
+                  <span>Committed (REDO): {recoveryOutput.committed_transactions.map((t) => `T${t}`).join(', ') || 'None'} · Losers (UNDO): {recoveryOutput.undone_transactions.map((t) => `T${t}`).join(', ') || 'None'}</span>
                 </div>
               </div>
               <div className="result-pairs">
-                <span>REDO Transactions (Committed) <b>{recoveryOutput.redone_transactions.map((t) => `T${t}`).join(', ') || 'None'}</b></span>
+                <span>REDO Transactions (Winners) <b>{recoveryOutput.redone_transactions.map((t) => `T${t}`).join(', ') || 'None'}</b></span>
                 <span>UNDO Transactions (Losers Rolled Back) <b>{recoveryOutput.undone_transactions.map((t) => `T${t}`).join(', ') || 'None'}</b></span>
               </div>
               <div className="table-wrap" style={{ marginTop: '10px' }}>
                 <table>
-                  <thead><tr><th>Data Item</th><th>Recovered Final Value after REDO + UNDO</th></tr></thead>
+                  <thead><tr><th>Data Item</th><th>Initial Value</th><th>Recovered Final Value</th><th>Recovery Action</th></tr></thead>
                   <tbody>
-                    {Object.entries(recoveryOutput.final_state).map(([item, val]) => (
-                      <tr key={item}><td><b>Item {item}</b></td><td><span className="state-label state-linked">{val}</span></td></tr>
-                    ))}
+                    {Object.entries(recoveryOutput.final_state).map(([item, val]) => {
+                      const parsedInit = parseRecoveryLogInput(dbmsRecoveryInput).initial_state[item] ?? '—';
+                      const changed = String(parsedInit) !== String(val);
+                      return (
+                        <tr key={item}>
+                          <td><b>Item {item}</b></td>
+                          <td>{parsedInit}</td>
+                          <td><span className="state-label state-linked">{val}</span></td>
+                          <td>
+                            <span className={`event-tag ${changed ? 'tag-mint' : 'tag-peach'}`}>
+                              {changed ? 'REDO APPLIED (Committed)' : 'UNDO RESTORED (Rolled Back)'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2755,6 +3374,51 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
                   <span>{lock2plOutput.deadlock_detected ? `Victim selected for rollback: T${lock2plOutput.victim_transaction_id ?? 2}` : 'All waiting transactions can proceed once holders commit.'}</span>
                 </div>
               </div>
+              <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+                <small style={{ color: 'var(--color-muted)', fontWeight: 600 }}>Wait-For Graph Edges</small>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {Object.entries(lock2plOutput.wait_for_graph).flatMap(([u, vs]) =>
+                    vs.map((v) => (
+                      <div key={`${u}-${v}`} className="lock-edge" style={{ margin: 0 }}>
+                        <span className="lock-node waiting">T{u}<small>WAITING</small></span>
+                        <ArrowRight size={16} />
+                        <span className="lock-node held">T{v}<small>HOLDS LOCK</small></span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="table-wrap" style={{ marginTop: '8px' }}>
+                <table>
+                  <thead><tr><th>Transaction</th><th>Data Item</th><th>Lock Mode</th><th>Lock Status</th></tr></thead>
+                  <tbody>
+                    {(dbmsLockPreset === 'DEADLOCK_CYCLE'
+                      ? [
+                          { tx: 'T1', item: 'Account_A', mode: 'EXCLUSIVE (X)', status: 'HELD' },
+                          { tx: 'T2', item: 'Account_B', mode: 'EXCLUSIVE (X)', status: 'HELD' },
+                          { tx: 'T1', item: 'Account_B', mode: 'EXCLUSIVE (X)', status: 'WAITING' },
+                          { tx: 'T2', item: 'Account_A', mode: 'EXCLUSIVE (X)', status: 'WAITING' },
+                        ]
+                      : [
+                          { tx: 'T1', item: 'Account_A', mode: 'EXCLUSIVE (X)', status: 'HELD' },
+                          { tx: 'T2', item: 'Account_A', mode: 'SHARED (S)', status: 'WAITING' },
+                          { tx: 'T2', item: 'Account_B', mode: 'EXCLUSIVE (X)', status: 'HELD' },
+                        ]
+                    ).map((lk, idx) => (
+                      <tr key={idx}>
+                        <td><b>{lk.tx}</b></td>
+                        <td>{lk.item}</td>
+                        <td><span className="event-tag tag-blue">{lk.mode}</span></td>
+                        <td>
+                          <span className={`state-label ${lk.status === 'HELD' ? 'state-linked' : 'state-review'}`}>
+                            {lk.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               <div className="result-pairs">
                 <span>Wait-For Graph Edges <b>{Object.entries(lock2plOutput.wait_for_graph).flatMap(([u, vs]) => vs.map((v) => `T${u} → T${v}`)).join(', ') || 'None'}</b></span>
                 <span>Deadlock Cycles <b>{lock2plOutput.cycles.length ? lock2plOutput.cycles.map((c) => c.map((t) => `T${t}`).join(' → ')).join('; ') : 'None'}</b></span>
@@ -2762,7 +3426,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               </div>
             </div>
           ) : (
-            <div className="empty-state">Click <b>Execute Strict 2PL & Deadlocks</b> to construct the wait-for graph and identify deadlock victims.</div>
+            <div className="empty-state">Click <b>Execute Strict 2PL &amp; Deadlocks</b> to construct the wait-for graph and identify deadlock victims.</div>
           )
         )}
       </section>
@@ -2801,8 +3465,8 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
   const [scheduleInput, setScheduleInput] = useState('R1(A), W1(A), R2(A), W2(A), R1(B), W1(B)');
   const [recoveryInput, setRecoveryInput] = useState('INIT A=100, INIT B=200\nBEGIN T1\nWRITE T1 A 100 -> 150\nBEGIN T2\nWRITE T2 B 200 -> 280\nCOMMIT T2');
   const [osScenarioType, setOsScenarioType] = useState<'CPU_LOAD' | 'MEMORY_PRESSURE' | 'DISK_IO' | 'RESOURCE_CONTENTION'>('CPU_LOAD');
-  const [osParam1, setOsParam1] = useState<number>(8);
-  const [osParam2, setOsParam2] = useState<number>(35);
+  const [osParam1, setOsParam1] = useState<number>(32);
+  const [osParam2, setOsParam2] = useState<number>(45);
   const [osParam3, setOsParam3] = useState<number>(4);
 
   const [whatIfOutput, setWhatIfOutput] = useState<WhatIfScenarioRecord | null>(null);
@@ -2839,12 +3503,12 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
 
       if (tab === 'OS workload') {
         const parameters = osScenarioType === 'CPU_LOAD'
-          ? { process_count: osParam1, avg_burst_time: osParam2, cpu_cores: osParam3 }
+          ? { process_count: osParam1, avg_burst_ms: osParam2, core_count: Math.max(1, osParam3) }
           : osScenarioType === 'MEMORY_PRESSURE'
-          ? { working_set_mb: osParam1 * 128, available_memory_mb: osParam2 * 32, page_fault_rate: osParam3 * 12 }
+          ? { allocated_mb: osParam1 * 128, total_ram_mb: Math.max(512, osParam2 * 128), frames: Math.max(1, osParam3), page_references: [1, 2, 3, 4, 1, 2, 5, 1, 2, 3, 4, 5] }
           : osScenarioType === 'DISK_IO'
-          ? { io_requests_per_sec: osParam1 * 40, avg_seek_time_ms: osParam2 / 4, disk_bandwidth_mbps: osParam3 * 50 }
-          : { competing_processes: osParam1, shared_resources: osParam3, lock_hold_time_ms: osParam2 * 3 };
+          ? { current_head: Math.min(199, Math.max(0, osParam1)), requests: [82, 170, 43, 140, 24, 16, 190].slice(0, Math.max(2, Math.min(7, osParam3))), algorithm: osParam2 % 2 === 0 ? 'SSTF' : 'FCFS' }
+          : { concurrent_tasks: osParam1, shared_locks: Math.max(1, osParam3) };
 
         const res = await analysisApi.saveOsScenario<WhatIfScenarioRecord>({
           name: scenarioTitle || `OS ${osScenarioType} experiment`,
@@ -2974,21 +3638,21 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
             <select value={osScenarioType} onChange={(e) => setOsScenarioType(e.target.value as 'CPU_LOAD' | 'MEMORY_PRESSURE' | 'DISK_IO' | 'RESOURCE_CONTENTION')}>
               <option value="CPU_LOAD">CPU Load & Queue Bottleneck</option>
               <option value="MEMORY_PRESSURE">Memory Pressure & Thrashing Risk</option>
-              <option value="DISK_IO">Disk I/O Saturation & IOPS</option>
+              <option value="DISK_IO">Disk I/O Saturation & Seek Distance</option>
               <option value="RESOURCE_CONTENTION">Lock / Resource Contention Probability</option>
             </select>
           </label>
           <div className="workbench-controls">
             <label className="field-label">
-              {osScenarioType === 'CPU_LOAD' ? 'Process Count' : osScenarioType === 'MEMORY_PRESSURE' ? 'Working Set Factor' : osScenarioType === 'DISK_IO' ? 'I/O Rate Factor' : 'Competing Processes'}
-              <input type="number" min={1} max={100} value={osParam1} onChange={(e) => setOsParam1(Number(e.target.value))} />
+              {osScenarioType === 'CPU_LOAD' ? 'Process Count' : osScenarioType === 'MEMORY_PRESSURE' ? 'Allocated Blocks (×128 MB)' : osScenarioType === 'DISK_IO' ? 'Initial Head Cylinder' : 'Concurrent Tasks'}
+              <input type="number" min={1} max={199} value={osParam1} onChange={(e) => setOsParam1(Number(e.target.value))} />
             </label>
             <label className="field-label">
-              {osScenarioType === 'CPU_LOAD' ? 'Avg Burst Time (ms)' : osScenarioType === 'MEMORY_PRESSURE' ? 'Available RAM Factor' : osScenarioType === 'DISK_IO' ? 'Seek Factor' : 'Lock Hold Factor'}
+              {osScenarioType === 'CPU_LOAD' ? 'Avg Burst Time (ms)' : osScenarioType === 'MEMORY_PRESSURE' ? 'Total RAM Blocks (×128 MB)' : osScenarioType === 'DISK_IO' ? 'Mode (Even=SSTF, Odd=FCFS)' : 'Contention Window Factor'}
               <input type="number" min={1} max={200} value={osParam2} onChange={(e) => setOsParam2(Number(e.target.value))} />
             </label>
             <label className="field-label">
-              {osScenarioType === 'CPU_LOAD' ? 'CPU Cores' : osScenarioType === 'MEMORY_PRESSURE' ? 'Page Fault Factor' : osScenarioType === 'DISK_IO' ? 'Bandwidth Factor' : 'Shared Resources'}
+              {osScenarioType === 'CPU_LOAD' ? 'CPU Cores' : osScenarioType === 'MEMORY_PRESSURE' ? 'Page Frames' : osScenarioType === 'DISK_IO' ? 'Pending I/O Requests' : 'Shared Locks'}
               <input type="number" min={1} max={64} value={osParam3} onChange={(e) => setOsParam3(Number(e.target.value))} />
             </label>
           </div>
@@ -3012,7 +3676,7 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
             <Check size={15} />
             <div>
               <strong>Scenario #{whatIfOutput?.scenario_id} Persisted & Evaluated</strong>
-              <span>{String(resObj.recommendation ?? (resObj.conflict_serializable !== undefined ? (resObj.conflict_serializable ? 'Conflict-Serializable Schedule' : 'Non-Serializable Conflict Cycle') : 'Recovery state computed deterministically'))}</span>
+              <span>{String(resObj.recommendation ?? (resObj.conflict_serializable !== undefined ? (resObj.conflict_serializable ? 'Conflict-Serializable Schedule' : 'Non-Serializable Conflict Cycle') : 'Deterministic state computed and stored in MySQL'))}</span>
             </div>
           </div>
           <div className="result-pairs">
@@ -3043,12 +3707,12 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
   const handleEmitAudit = async () => {
     try {
       const actionName = auditActionInput || 'WORKSPACE_CHECK';
+      const detailText = `UID ${currentUser.uid_linux ?? 1000} · Role: ${currentUser.is_admin ? 'Admin' : 'Member'}`;
       const res = await workflowsApi.createAuditEntry<{ status?: string; message?: string }>({
         user_id: currentUser.user_id,
-        uid_linux: currentUser.uid_linux ?? 1000,
         username: currentUser.username,
         action: actionName,
-        process_id: 4211,
+        details: detailText,
       });
       const nowStr = new Date().toTimeString().slice(0, 8);
       setLocalAuditEntries((prev) => [
@@ -3056,7 +3720,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
           time: nowStr,
           user: currentUser.username,
           action: actionName,
-          detail: `${res.message ?? 'Audit log entry recorded.'} (UID ${currentUser.uid_linux ?? 1000}, PID 4211)`,
+          detail: `${res.message ?? 'Audit log entry recorded.'} (${detailText})`,
           source: 'POST /api/audit/',
         },
         ...prev,
@@ -3075,7 +3739,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
         formatTimeShort(log.created_at ?? log.timestamp),
         String(log.username ?? currentUser.username),
         String(log.action ?? 'Action'),
-        `PID ${String(log.process_id ?? 4211)} · UID ${String(log.uid_linux ?? 1000)}`,
+        String(log.details ?? `UID ${String(log.uid_linux ?? 1000)}`),
         'Security Engine',
       ])
     : [

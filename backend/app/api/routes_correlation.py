@@ -265,3 +265,63 @@ def auto_correlate(
         raise HTTPException(status_code=503, detail=str(error)) from error
     finally:
         connection.close()
+
+
+@router.get("/traces")
+def list_persisted_traces(limit: int = 30) -> list[dict]:
+    """Return recent persisted cross_layer_traces with correlation method summary."""
+    traces: list[dict] = []
+    try:
+        conn = get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                """
+                SELECT
+                    t.trace_id,
+                    t.pid,
+                    t.transaction_id,
+                    t.status,
+                    t.started_at,
+                    t.ended_at,
+                    t.summary,
+                    COUNT(ec.correlation_id) AS event_count,
+                    MAX(ec.correlation_method) AS correlation_method,
+                    MAX(ec.confidence_score) AS confidence_score
+                FROM cross_layer_traces t
+                LEFT JOIN event_correlations ec ON ec.trace_id = t.trace_id
+                GROUP BY t.trace_id, t.pid, t.transaction_id, t.status, t.started_at, t.ended_at, t.summary
+                ORDER BY t.trace_id DESC
+                LIMIT %s
+                """,
+                (max(1, min(limit, 100)),),
+            )
+            for row in cur.fetchall():
+                method = str(row.get("correlation_method") or "")
+                classification = (
+                    "DIRECT"
+                    if "SOCKET" in method.upper()
+                    else ("TEMPORAL" if method else "DIRECT")
+                )
+                traces.append(
+                    {
+                        "trace_id": row["trace_id"],
+                        "pid": row["pid"],
+                        "transaction_id": row["transaction_id"],
+                        "status": row["status"],
+                        "started_at": row["started_at"].isoformat() if hasattr(row.get("started_at"), "isoformat") else str(row.get("started_at") or ""),
+                        "ended_at": row["ended_at"].isoformat() if hasattr(row.get("ended_at"), "isoformat") else str(row.get("ended_at") or ""),
+                        "summary": row.get("summary") or f"PID {row['pid']} · TX {row['transaction_id']}",
+                        "event_count": int(row.get("event_count") or 0),
+                        "correlation_method": method or "PID_TRANSACTION_QUERY_TIMESTAMP",
+                        "classification": classification,
+                        "confidence_score": float(row.get("confidence_score") or 1.0),
+                    }
+                )
+            cur.close()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return traces
+

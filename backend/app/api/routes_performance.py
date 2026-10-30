@@ -148,46 +148,48 @@ def get_system_health(request: Request = None) -> dict:
             # Check performance schema flag
             cur.execute("SELECT @@performance_schema AS ps_enabled")
             ps_row = cur.fetchone()
-            if ps_row and ps_row.get("ps_enabled") in (1, "1", True, "YES", "yes"):
-                dbms_metric["available"] = True
-                dbms_metric["status"] = "CONNECTED"
-                dbms_metric["reason"] = None
-                
-                # Active threads/connections
-                cur.execute("SELECT COUNT(*) AS active_conn FROM information_schema.processlist")
-                c_row = cur.fetchone()
-                if c_row:
-                    dbms_metric["active_connections"] = c_row.get("active_conn", 0)
+            ps_enabled = bool(ps_row and ps_row.get("ps_enabled") in (1, "1", True, "YES", "yes"))
 
-                # Recent query stats from observations
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) AS cnt, 
-                        AVG(execution_time_ms) AS avg_lat 
-                    FROM dbms_query_observations 
-                    WHERE observed_at >= NOW() - INTERVAL 1 MINUTE
-                """)
-                q_row = cur.fetchone()
-                if q_row and q_row.get("cnt"):
-                    dbms_metric["query_throughput_per_sec"] = round(q_row["cnt"] / 60.0, 1)
-                    dbms_metric["avg_query_latency_ms"] = round(float(q_row["avg_lat"] or 0.0), 2)
+            dbms_metric["available"] = True
+            dbms_metric["status"] = "CONNECTED" if ps_enabled else "CONNECTED (PROCESSLIST FALLBACK)"
+            dbms_metric["reason"] = None if ps_enabled else "Performance Schema disabled; using INFORMATION_SCHEMA.PROCESSLIST fallback."
 
-                # Active transactions and locks
-                cur.execute("SELECT COUNT(*) AS active_tx FROM transactions WHERE status = 'ACTIVE'")
-                t_row = cur.fetchone()
-                if t_row:
-                    dbms_metric["active_transactions"] = t_row.get("active_tx", 0)
+            # Active threads/connections
+            cur.execute("SELECT COUNT(*) AS active_conn FROM information_schema.processlist")
+            c_row = cur.fetchone()
+            if c_row:
+                dbms_metric["active_connections"] = c_row.get("active_conn", 0)
 
-                cur.execute("SELECT COUNT(*) AS active_lks FROM locks WHERE status IN ('HELD', 'WAITING')")
-                l_row = cur.fetchone()
-                if l_row:
-                    dbms_metric["active_locks"] = l_row.get("active_lks", 0)
+            # Recent query stats from observations
+            cur.execute("""
+                SELECT 
+                    COUNT(*) AS cnt, 
+                    AVG(execution_time_ms) AS avg_lat 
+                FROM dbms_query_observations 
+                WHERE observed_at >= NOW() - INTERVAL 1 MINUTE
+            """)
+            q_row = cur.fetchone()
+            if q_row and q_row.get("cnt"):
+                dbms_metric["query_throughput_per_sec"] = round(q_row["cnt"] / 60.0, 1)
+                dbms_metric["avg_query_latency_ms"] = round(float(q_row["avg_lat"] or 0.0), 2)
 
-                wait_cnt = 0
-                cur.execute("SELECT COUNT(*) AS waiting_lks FROM locks WHERE status = 'WAITING'")
-                w_row = cur.fetchone()
-                if w_row:
-                    wait_cnt += int(w_row.get("waiting_lks") or 0)
+            # Active transactions and locks
+            cur.execute("SELECT COUNT(*) AS active_tx FROM transactions WHERE status = 'ACTIVE'")
+            t_row = cur.fetchone()
+            if t_row:
+                dbms_metric["active_transactions"] = t_row.get("active_tx", 0)
+
+            cur.execute("SELECT COUNT(*) AS active_lks FROM locks WHERE status IN ('HELD', 'WAITING')")
+            l_row = cur.fetchone()
+            if l_row:
+                dbms_metric["active_locks"] = l_row.get("active_lks", 0)
+
+            wait_cnt = 0
+            cur.execute("SELECT COUNT(*) AS waiting_lks FROM locks WHERE status = 'WAITING'")
+            w_row = cur.fetchone()
+            if w_row:
+                wait_cnt += int(w_row.get("waiting_lks") or 0)
+            if ps_enabled:
                 try:
                     cur.execute("SELECT COUNT(*) AS ps_waits FROM performance_schema.data_lock_waits")
                     psw_row = cur.fetchone()
@@ -195,36 +197,34 @@ def get_system_health(request: Request = None) -> dict:
                         wait_cnt += int(psw_row.get("ps_waits") or 0)
                 except Exception:
                     pass
-                dbms_metric["lock_wait_count"] = wait_cnt
+            dbms_metric["lock_wait_count"] = wait_cnt
 
-                # Correlation statistics
-                cur.execute("SELECT COUNT(*) AS total_traces FROM cross_layer_traces")
-                tr_row = cur.fetchone()
-                if tr_row:
-                    corr_metric["traces_count"] = tr_row.get("total_traces", 0)
+            # Correlation statistics
+            cur.execute("SELECT COUNT(*) AS total_traces FROM cross_layer_traces")
+            tr_row = cur.fetchone()
+            if tr_row:
+                corr_metric["traces_count"] = tr_row.get("total_traces", 0)
 
-                cur.execute("""
-                    SELECT 
-                        COUNT(CASE WHEN correlation_method LIKE '%SOCKET%' THEN 1 END) AS direct_cnt,
-                        COUNT(CASE WHEN correlation_method NOT LIKE '%SOCKET%' THEN 1 END) AS temporal_cnt
-                    FROM event_correlations
-                """)
-                ev_row = cur.fetchone()
-                if ev_row:
-                    corr_metric["direct_matches"] = ev_row.get("direct_cnt", 0)
-                    corr_metric["temporal_matches"] = ev_row.get("temporal_cnt", 0)
+            cur.execute("""
+                SELECT 
+                    COUNT(CASE WHEN correlation_method LIKE '%SOCKET%' THEN 1 END) AS direct_cnt,
+                    COUNT(CASE WHEN correlation_method NOT LIKE '%SOCKET%' THEN 1 END) AS temporal_cnt
+                FROM event_correlations
+            """)
+            ev_row = cur.fetchone()
+            if ev_row:
+                corr_metric["direct_matches"] = ev_row.get("direct_cnt", 0)
+                corr_metric["temporal_matches"] = ev_row.get("temporal_cnt", 0)
 
-                try:
-                    cur.execute("SELECT AVG(metric_value) AS avg_lat FROM performance_records WHERE metric_name LIKE '%latency%'")
-                    pr_row = cur.fetchone()
-                    if pr_row and pr_row.get("avg_lat") is not None:
-                        corr_metric["avg_correlation_latency_ms"] = round(float(pr_row["avg_lat"]), 2)
-                    else:
-                        corr_metric["avg_correlation_latency_ms"] = round(float(dbms_metric["avg_query_latency_ms"] or 1.2), 2)
-                except Exception:
-                    corr_metric["avg_correlation_latency_ms"] = 1.2
-            else:
-                dbms_metric["reason"] = "MySQL Performance Schema is disabled on this server."
+            try:
+                cur.execute("SELECT AVG(metric_value) AS avg_lat FROM performance_records WHERE metric_name LIKE '%latency%'")
+                pr_row = cur.fetchone()
+                if pr_row and pr_row.get("avg_lat") is not None:
+                    corr_metric["avg_correlation_latency_ms"] = round(float(pr_row["avg_lat"]), 2)
+                else:
+                    corr_metric["avg_correlation_latency_ms"] = round(float(dbms_metric["avg_query_latency_ms"] or 1.2), 2)
+            except Exception:
+                corr_metric["avg_correlation_latency_ms"] = 1.2
             cur.close()
         finally:
             conn.close()
