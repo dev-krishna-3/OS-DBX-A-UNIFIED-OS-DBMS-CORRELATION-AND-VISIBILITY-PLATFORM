@@ -11,16 +11,6 @@ import { events as sampleEvents, observations as sampleObservations, pageMeta, s
 import AuthPage from './features/auth/AuthPage';
 import { analysisApi, authApi, correlationApi, hasAccessToken, incidentsApi, observabilityApi, simulationsApi, workflowsApi } from './api';
 import type { AuthUser } from './api/auth';
-import HeroSection from './components/HeroSection';
-import FeaturesBento from './components/FeaturesBento';
-import PricingSection from './components/PricingSection';
-import TestimonialsSection from './components/TestimonialsSection';
-import FaqSection from './components/FaqSection';
-import CtaBanner from './components/CtaBanner';
-import MultiColumnFooter from './components/MultiColumnFooter';
-import OnboardingModal from './components/OnboardingModal';
-import BlogSection from './components/BlogSection';
-import ContactSection from './components/ContactSection';
 import EmptyState from './components/EmptyState';
 
 const iconMap = {
@@ -281,7 +271,6 @@ function App() {
   const [syncDropdownOpen, setSyncDropdownOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState('Just now');
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authReady, setAuthReady] = useState(() => !hasAccessToken());
   const [liveData, setLiveData] = useState<LiveWorkspaceData>({
@@ -476,25 +465,20 @@ function App() {
                 <span className="brand-wordmark">OS-DBX</span>
                 <span className="brand-caption">Cross-layer observability</span>
               </a>
-              <div className="topbar-context-badge" aria-label="Current view location">
-                <span className="context-section">{pageMeta[section]?.title || 'Workspace'}</span>
-                <ChevronRight size={12} className="context-sep" aria-hidden="true" />
-                <span className="context-page">{activeTab}</span>
-              </div>
             </div>
             <div className="topbar-actions">
             <div className="search-wrapper">
               <label className="search-box">
                 <Search size={16} />
                 <input
-                  aria-label="Search activity"
+                  aria-label="Search telemetry"
                   value={search}
                   onFocus={() => setSearchPaletteOpen(true)}
                   onChange={(event) => {
                     setSearch(event.target.value);
                     if (!searchPaletteOpen) setSearchPaletteOpen(true);
                   }}
-                  placeholder="Search activity, views, or telemetry…"
+                  placeholder="Search telemetry…"
                 />
                 <kbd onClick={() => setSearchPaletteOpen((v) => !v)} style={{ cursor: 'pointer' }}>⌘ K</kbd>
               </label>
@@ -666,12 +650,12 @@ function App() {
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
             transition={{ duration: prefersReducedMotion ? 0 : 0.18, ease: 'easeOut' }}>
             {section === 'overview'
-              ? <Overview events={filteredEvents} liveData={liveData} sampleMode={sampleMode} guidedStep={guidedStep} onRunDemo={() => { setSection('observatory'); setActiveTab('Unified console'); setGuidedStep(0); }} onNextStep={() => setGuidedStep((step) => (step + 1) % 5)} onOpen={(id) => openSection(id)} onOpenQuickStart={() => setOnboardingOpen(true)} onAction={notify} />
+              ? <Overview events={filteredEvents} liveData={liveData} sampleMode={sampleMode} guidedStep={guidedStep} onRunDemo={() => { setSection('observatory'); setActiveTab('Unified console'); setGuidedStep(0); }} onNextStep={() => setGuidedStep((step) => (step + 1) % 5)} onOpen={(id) => openSection(id)} />
               : <FeaturePage section={section} tab={activeTab} onSelectTab={setActiveTab} events={filteredEvents} liveData={liveData} onRefresh={refreshLiveWorkspace} search={search} selectedAlgorithm={selectedAlgorithm} onAlgorithm={setSelectedAlgorithm} onAction={notify} sampleMode={sampleMode} onToggleSample={() => setSampleMode((value) => !value)} guidedStep={guidedStep} onNextStep={() => setGuidedStep((step) => Math.min(step + 1, 4))} currentUser={currentUser} onSignOut={() => { authApi.signOut(); setCurrentUser(null); }} />}
           </m.div>
           </AnimatePresence>
 
-          <MultiColumnFooter onNavigateSection={(sec) => openSection(sec as SectionId)} connected={liveData.connected && !sampleMode} />
+          <footer className="page-footer"><span>OS-DBX Unified Forensic Observability Platform · Real-time causal visibility</span><span>{liveData.connected && !sampleMode ? 'Operational · All collectors streaming' : 'Demo workspace'}</span></footer>
         </main>
       </div>
       <AnimatePresence>
@@ -683,13 +667,12 @@ function App() {
           <Check size={16} />{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss"><X size={15} /></button>
         </m.div>}
       </AnimatePresence>
-      <OnboardingModal isOpen={onboardingOpen} onClose={() => setOnboardingOpen(false)} onFinish={() => { openSection('observatory'); notify('Welcome to OS-DBX live workspace!'); }} />
     </div>
     </LazyMotion>
   );
 }
 
-function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onRunDemo, onNextStep, onOpen, onOpenQuickStart, onAction }: { events: ActivityEvent[]; liveData: LiveWorkspaceData; sampleMode: boolean; guidedStep: number; onRunDemo: () => void; onNextStep: () => void; onOpen: (id: SectionId) => void; onOpenQuickStart: () => void; onAction: (msg: string) => void }) {
+function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onRunDemo, onNextStep, onOpen }: { events: ActivityEvent[]; liveData: LiveWorkspaceData; sampleMode: boolean; guidedStep: number; onRunDemo: () => void; onNextStep: () => void; onOpen: (id: SectionId) => void }) {
   const osCount = !sampleMode && (liveData.osEvents.length + liveData.filesystemEvents.length) > 0
     ? String(liveData.osEvents.length + liveData.filesystemEvents.length)
     : '1,284';
@@ -704,19 +687,27 @@ function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onR
     : '02';
 
   return <>
-    <HeroSection
-      onLaunchObservatory={onRunDemo}
-      onExploreCorrelation={() => onOpen('correlation')}
-      onOpenQuickStart={onOpenQuickStart}
-      connected={liveData.connected && !sampleMode}
-    />
-
     <div className="summary-row">
       <Metric label="OS events" value={osCount} change={liveData.connected ? 'Live' : '+8.2%'} up detail={liveData.connected ? 'Captured from OS stream' : 'Observed in sample window'} tone="mint" icon={<Monitor size={17} />} />
       <Metric label="DBMS observations" value={dbmsCount} change={liveData.connected ? 'Live' : '+4.6%'} up detail="Performance Schema collector" tone="lavender" icon={<Database size={17} />} />
       <Metric label="Correlated traces" value={tracesCount} change="Evidence-linked" detail="Identity bridge + temporal" tone="blue" icon={<GitBranch size={17} />} />
       <Metric label="Open incidents" value={incidentsCount} change="Monitored" detail="Deadlock investigations" tone="peach" icon={<ShieldAlert size={17} />} />
     </div>
+
+    <section className="overview-feature trace-hero">
+      <div className="feature-copy">
+        <h2>One checkout.<br />Every layer in view.</h2>
+        <p>Follow a checkout process from its operating-system identity to the database query and the evidence linking them.</p>
+        <div className="feature-facts"><span><Check size={14} /> Process identity</span><span><Check size={14} /> Query evidence</span><span><Check size={14} /> Trace explanation</span></div>
+        <button type="button" className="button button-primary feature-cta" onClick={onRunDemo}><Play size={15} fill="currentColor" /> Open guided console <ArrowRight size={15} /></button>
+        <span className="sample-note">{liveData.connected && !sampleMode ? 'Live collector pipeline active' : 'Offline demo dataset'}</span>
+      </div>
+      <div className="trace-stage" role="img" aria-label="Illustrative trace connecting operating-system process evidence through a socket identity bridge to a database query">
+        <div className="trace-stage-top"><span>Cross-layer trace</span><span className="trace-live-label"><i /> {liveData.connected ? 'Live bridge' : 'Sample evidence'}</span></div>
+        <LayerDiagram />
+        <div className="trace-stage-foot"><span><Monitor size={14} /> Process ID 4211</span><ArrowRight size={15} /><span><Network size={14} /> Socket → PID</span><ArrowRight size={15} /><span><Database size={14} /> OBS-8842</span></div>
+      </div>
+    </section>
 
     {guidedStep >= 0 && <section className="guided-strip"><div className="guided-icon"><Sparkles size={17} /></div><div className="guided-text"><strong>Guided demo, step {guidedStep + 1} of 5</strong><span>{['Choose the process identity', 'Inspect the socket-to-PID evidence', 'Review the captured SQL observation', 'Follow the cross-layer trace', 'Read the correlation explanation'][guidedStep]}</span></div><div className="guided-progress">{[0, 1, 2, 3, 4].map((step) => <i className={step <= guidedStep ? 'done' : ''} key={step} />)}</div><button type="button" className="text-action" onClick={onNextStep}>Next step <ArrowRight size={14} /></button></section>}
 
@@ -732,20 +723,6 @@ function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onR
         <button type="button" className="incident-row" aria-label="Open What-If deterministic analysis" onClick={() => onOpen('whatif')}><span className="incident-icon info"><Sparkles size={16} /></span><span className="incident-content"><strong>What-If Scenario Engine</strong><small>Evaluate schedules, crash logs, and OS contention models</small></span><ChevronRight size={15} /></button>
       </section>
     </div>
-
-    <FeaturesBento onNavigateSection={(sec) => onOpen(sec as SectionId)} />
-
-    <PricingSection onSelectTier={(tier) => onAction(`Capacity pack selected: ${tier}. Ready for host node deployment.`)} />
-
-    <TestimonialsSection />
-
-    <FaqSection />
-
-    <BlogSection />
-
-    <ContactSection onSuccess={() => onAction('Inquiry received. A systems engineer will contact you shortly.')} />
-
-    <CtaBanner onSubscribeSuccess={(email) => onAction(`Subscribed ${email} to OS-DBX engineering dispatch.`)} />
   </>;
 }
 
