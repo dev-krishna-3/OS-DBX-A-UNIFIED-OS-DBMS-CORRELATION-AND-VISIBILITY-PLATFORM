@@ -909,21 +909,47 @@ function UnifiedConsole({ guidedStep, onNextStep, onAction, onRefresh }: { guide
   const [realWorldOutput, setRealWorldOutput] = useState<Record<string, any> | null>(null);
   const [runningRealWorld, setRunningRealWorld] = useState(false);
 
-  const executeLiveFlagshipDemo = async () => {
+  const executeLiveFlagshipDemo = useCallback(async (silent = false) => {
     setRunningDemo(true);
     try {
       const res = await correlationApi.demoCorrelation<DemoCorrelationOutput>();
       setDemoOutput(res);
       await onRefresh(false);
-      const traceId = res.result?.trace?.trace_id ?? 42;
-      const cls = res.result?.classification ?? 'DIRECT';
-      onAction(`Flagship correlation executed: Trace #${traceId} verified (${cls}).`);
+      if (!silent) {
+        const traceId = res.result?.trace?.trace_id ?? 42;
+        const cls = res.result?.classification ?? 'DIRECT';
+        onAction(`Flagship correlation executed: Trace #${traceId} verified (${cls}).`);
+      }
     } catch (err) {
-      onAction(err instanceof Error ? err.message : 'Could not run flagship demo.');
+      if (!silent) {
+        onAction(err instanceof Error ? err.message : 'Could not run flagship demo.');
+      }
     } finally {
       setRunningDemo(false);
     }
-  };
+  }, [onAction, onRefresh]);
+
+  useEffect(() => {
+    if (!demoOutput) {
+      void executeLiveFlagshipDemo(true);
+    }
+  }, [demoOutput, executeLiveFlagshipDemo]);
+
+  useEffect(() => {
+    if (workflow === 'Ad-hoc SQL causality' && !adhocOutput && !runningAdhoc) {
+      setRunningAdhoc(true);
+      void workflowsApi.runSqlCausality<any>(adhocQuery)
+        .then((res) => setAdhocOutput(res))
+        .catch(() => {})
+        .finally(() => setRunningAdhoc(false));
+    } else if (workflow === 'Real-world workload evaluator' && !realWorldOutput && !runningRealWorld) {
+      setRunningRealWorld(true);
+      void workflowsApi.realWorldEvaluation<any>()
+        .then((res) => setRealWorldOutput(res))
+        .catch(() => {})
+        .finally(() => setRunningRealWorld(false));
+    }
+  }, [workflow, adhocOutput, runningAdhoc, adhocQuery, realWorldOutput, runningRealWorld]);
 
   const traceObj = demoOutput?.result?.trace;
   const classification = demoOutput?.result?.classification;
@@ -1377,7 +1403,7 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
     }
   };
 
-  const runManualCorrelation = async () => {
+  const runManualCorrelation = useCallback(async (silent = false) => {
     setCorrelating(true);
     try {
       const pidNum = Number(manualPid) || 4211;
@@ -1426,13 +1452,23 @@ function Correlation({ tab, liveData, onRefresh, onAction }: { tab: string; live
         causal_sequence: (res.causal_sequence ?? []) as Array<Record<string, unknown>>,
       });
       await onRefresh(false);
-      onAction(`Linked OS PID ${res.trace?.pid ?? pidNum} ↔ TX-${res.trace?.transaction_id ?? txNum} (Trace #${res.trace?.trace_id ?? ''}).`);
+      if (!silent) {
+        onAction(`Linked OS PID ${res.trace?.pid ?? pidNum} ↔ TX-${res.trace?.transaction_id ?? txNum} (Trace #${res.trace?.trace_id ?? ''}).`);
+      }
     } catch (err) {
-      onAction(err instanceof Error ? err.message : 'Correlation executed.');
+      if (!silent) {
+        onAction(err instanceof Error ? err.message : 'Correlation executed.');
+      }
     } finally {
       setCorrelating(false);
     }
-  };
+  }, [manualPid, manualTxId, selectedObsId, onRefresh, onAction]);
+
+  useEffect(() => {
+    if (!corrOutput) {
+      void runManualCorrelation(true);
+    }
+  }, [corrOutput, runManualCorrelation]);
 
   if (tab === 'Identity bridge') {
     const mappings = liveData.bridgeMap?.mapping ?? [];
@@ -2602,7 +2638,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
   const [lock2plOutput, setLock2plOutput] = useState<Deadlock2PLResult | null>(null);
   const [runningSim, setRunningSim] = useState(false);
 
-  const runBackendSimulation = useCallback(async () => {
+  const runBackendSimulation = useCallback(async (silent = false) => {
     setRunningSim(true);
     try {
       if (tab === 'OS simulations') {
@@ -2631,7 +2667,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
             ],
           });
           setCpuOutput(res);
-          onAction(`CPU Scheduling (${res.algorithm}): Avg Wait ${res.avg_waiting_time}u, Avg Turnaround ${res.avg_turnaround_time}u.`);
+          if (!silent) onAction(`CPU Scheduling (${res.algorithm}): Avg Wait ${res.avg_waiting_time}u, Avg Turnaround ${res.avg_turnaround_time}u.`);
           return;
         }
 
@@ -2644,7 +2680,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
             reference_string: refs.length > 0 ? refs : [7, 0, 1, 2, 0, 3, 0, 4],
           });
           setMemOutput(res);
-          onAction(`Memory Simulation (${res.algorithm}): ${res.page_faults} Page Faults, ${res.page_hits} Page Hits.`);
+          if (!silent) onAction(`Memory Simulation (${res.algorithm}): ${res.page_faults} Page Faults, ${res.page_hits} Page Hits.`);
           return;
         }
 
@@ -2664,7 +2700,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
             const res = await simulationsApi.bankerDeadlock<BankersSimResult>(payload);
             setBankersOutput(res);
             setRagOutput(null);
-            onAction(`Banker's Algorithm: ${res.is_safe ? `SAFE (${res.safe_sequence.map((p) => `P${p}`).join(' → ')})` : 'UNSAFE STATE'}`);
+            if (!silent) onAction(`Banker's Algorithm: ${res.is_safe ? `SAFE (${res.safe_sequence.map((p) => `P${p}`).join(' → ')})` : 'UNSAFE STATE'}`);
           } else {
             const payload = deadlockPreset === 'RAG_ACYCLIC'
               ? {
@@ -2682,7 +2718,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
             const res = await simulationsApi.resourceGraphDeadlock<RagSimResult>(payload);
             setRagOutput(res);
             setBankersOutput(null);
-            onAction(`RAG Analysis: ${res.deadlock_detected ? 'Deadlock Cycle Detected!' : 'No Deadlock Cycle'}`);
+            if (!silent) onAction(`RAG Analysis: ${res.deadlock_detected ? 'Deadlock Cycle Detected!' : 'No Deadlock Cycle'}`);
           }
           return;
         }
@@ -2695,7 +2731,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
             tracks: tracks.length > 0 ? tracks : [82, 170, 43, 140, 24, 16, 190],
           });
           setDiskOutput(res);
-          onAction(`Disk Scheduling (${res.algorithm}): Total seek distance = ${res.total_seek_time} cylinders.`);
+          if (!silent) onAction(`Disk Scheduling (${res.algorithm}): Total seek distance = ${res.total_seek_time} cylinders.`);
           return;
         }
 
@@ -2705,7 +2741,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
             iterations: Math.max(1, Math.min(20, syncIterations)),
           });
           setSyncOutput(res);
-          onAction(`Producer-Consumer Synchronization: ${res.result_log.length} steps executed.`);
+          if (!silent) onAction(`Producer-Consumer Synchronization: ${res.result_log.length} steps executed.`);
           return;
         }
       } else {
@@ -2713,11 +2749,13 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
           const operations = parseScheduleString(dbmsScheduleInput);
           const res = await workflowsApi.analyzeSchedule<ScheduleAnalysisResult>({ operations });
           setSerialOutput(res);
-          onAction(
-            res.conflict_serializable
-              ? 'Schedule is Conflict-Serializable (Precedence graph is acyclic).'
-              : `Not Conflict-Serializable! Cycles detected: ${res.cycles.length}`,
-          );
+          if (!silent) {
+            onAction(
+              res.conflict_serializable
+                ? 'Schedule is Conflict-Serializable (Precedence graph is acyclic).'
+                : `Not Conflict-Serializable! Cycles detected: ${res.cycles.length}`,
+            );
+          }
           return;
         }
 
@@ -2725,9 +2763,11 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
           const parsed = parseRecoveryLogInput(dbmsRecoveryInput);
           const res = await workflowsApi.recover<RecoverySimResult>(parsed);
           setRecoveryOutput(res);
-          onAction(
-            `ARIES/WAL Recovery completed: REDO [${res.redone_transactions.map((t) => `T${t}`).join(', ')}], UNDO [${res.undone_transactions.map((t) => `T${t}`).join(', ')}].`,
-          );
+          if (!silent) {
+            onAction(
+              `ARIES/WAL Recovery completed: REDO [${res.redone_transactions.map((t) => `T${t}`).join(', ')}], UNDO [${res.undone_transactions.map((t) => `T${t}`).join(', ')}].`,
+            );
+          }
           return;
         }
 
@@ -2746,16 +2786,18 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
               ];
           const res = await workflowsApi.detectDeadlock<Deadlock2PLResult>({ locks });
           setLock2plOutput(res);
-          onAction(
-            res.deadlock_detected
-              ? `2PL Deadlock Detected! Cycles: ${res.cycles.map((c) => c.map((t) => `T${t}`).join(' → ')).join('; ')}`
-              : 'Strict 2PL Lock Graph is acyclic (no deadlock).',
-          );
+          if (!silent) {
+            onAction(
+              res.deadlock_detected
+                ? `2PL Deadlock Detected! Cycles: ${res.cycles.map((c) => c.map((t) => `T${t}`).join(' → ')).join('; ')}`
+                : 'Strict 2PL Lock Graph is acyclic (no deadlock).',
+            );
+          }
           return;
         }
       }
     } catch (err) {
-      onAction(err instanceof Error ? err.message : 'Simulation execution failed.');
+      if (!silent) onAction(err instanceof Error ? err.message : 'Simulation execution failed.');
     } finally {
       setRunningSim(false);
     }
@@ -2764,6 +2806,10 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
     deadlockPreset, diskHead, diskTracksInput, syncIterations, dbmsScheduleInput,
     dbmsRecoveryInput, dbmsLockPreset, onAction,
   ]);
+
+  useEffect(() => {
+    void runBackendSimulation(true);
+  }, [tab, lab, activeAlgorithm, deadlockPreset, dbmsLockPreset, runBackendSimulation]);
 
   return <>
     <div className="lab-picker">
@@ -3472,6 +3518,55 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
   const [whatIfOutput, setWhatIfOutput] = useState<WhatIfScenarioRecord | null>(null);
   const [selectedSavedScenario, setSelectedSavedScenario] = useState<WhatIfScenarioRecord | null>(null);
   const [evaluating, setEvaluating] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const loadPreview = async () => {
+      try {
+        if (tab === 'Schedule analysis') {
+          const operations = parseScheduleString(scheduleInput);
+          const res = await workflowsApi.analyzeSchedule<Record<string, unknown>>({ operations });
+          if (active) {
+            setWhatIfOutput({
+              scenario_id: Number(liveData.scenarios[0]?.scenario_id ?? 1),
+              name: scenarioTitle,
+              analysis_type: 'SCHEDULE',
+              result: res,
+            });
+          }
+        } else if (tab === 'Recovery experiment') {
+          const parsed = parseRecoveryLogInput(recoveryInput);
+          const res = await workflowsApi.recover<Record<string, unknown>>(parsed);
+          if (active) {
+            setWhatIfOutput({
+              scenario_id: Number(liveData.scenarios[0]?.scenario_id ?? 2),
+              name: scenarioTitle,
+              analysis_type: 'RECOVERY',
+              result: res,
+            });
+          }
+        } else if (tab === 'OS workload') {
+          if (active) {
+            setWhatIfOutput({
+              scenario_id: Number(liveData.scenarios[0]?.scenario_id ?? 3),
+              name: scenarioTitle,
+              analysis_type: `OS_${osScenarioType}`,
+              result: {
+                scenario_type: osScenarioType,
+                estimated_utilization_percent: Math.min(99, Math.round((osParam1 * osParam2) / Math.max(1, osParam3 * 12))),
+                queue_depth: Math.max(1, Math.round(osParam1 / Math.max(1, osParam3))),
+                recommendation: 'Deterministic workload preview ready — click Analyze & save scenario to persist to MySQL.',
+              },
+            });
+          }
+        }
+      } catch {
+        // Ignore preview error
+      }
+    };
+    void loadPreview();
+    return () => { active = false; };
+  }, [tab, scheduleInput, recoveryInput, osScenarioType, osParam1, osParam2, osParam3, scenarioTitle, liveData.scenarios]);
 
   const runAndSaveWhatIf = async () => {
     setEvaluating(true);
