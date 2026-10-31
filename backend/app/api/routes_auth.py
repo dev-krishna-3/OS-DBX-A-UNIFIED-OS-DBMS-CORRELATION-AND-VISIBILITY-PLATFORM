@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 import mysql.connector
 
@@ -53,7 +53,8 @@ def get_dbms_connection():
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register_user(
-    user_in: UserCreate, 
+    user_in: UserCreate,
+    background_tasks: BackgroundTasks,
     connection: mysql.connector.MySQLConnection = Depends(get_dbms_connection)
 ) -> Any:
     """Register a new user in the system."""
@@ -105,10 +106,11 @@ def register_user(
         
         # Fetch the newly created user
         new_user = get_user_by_username(connection, user_in.username)
-        email_sent = send_signup_notification(user_in.email, user_in.username)
+        if user_in.email:
+            background_tasks.add_task(send_signup_notification, user_in.email, user_in.username)
         if new_user:
             out_data = new_user.model_dump()
-            out_data["email_notification_sent"] = email_sent
+            out_data["email_notification_sent"] = bool(user_in.email)
             return UserOut(**out_data)
         raise HTTPException(status_code=500, detail="User created but could not be loaded.")
     except mysql.connector.Error as err:
@@ -119,6 +121,7 @@ def register_user(
 
 @router.post("/token", response_model=Token)
 def login_access_token(
+    background_tasks: BackgroundTasks,
     form_data: OAuth2PasswordRequestForm = Depends(),
     connection: mysql.connector.MySQLConnection = Depends(get_dbms_connection)
 ) -> Any:
@@ -139,11 +142,12 @@ def login_access_token(
     )
     clear_failed_attempts(form_data.username)
     recipient_email = user.email or (form_data.username if "@" in form_data.username else None)
-    email_sent = send_signin_notification(recipient_email, user.username)
+    if recipient_email:
+        background_tasks.add_task(send_signin_notification, recipient_email, user.username)
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "email_notification_sent": email_sent,
+        "email_notification_sent": bool(recipient_email),
     }
 
 

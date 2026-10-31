@@ -2407,3 +2407,172 @@ button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, 
 .app-shell[data-tone="blue"] .panel-heading p {
   color: var(--color-ink-2) !important;
 }
+
+
+/* 9. Interactive Event List & Forensic Inspector Modal */
+.app-shell .event-row.clickable {
+  cursor: pointer;
+  border-radius: 9px;
+  padding: 6px 12px;
+  transition: background-color 0.16s ease, transform 0.1s ease, border-color 0.16s ease;
+  user-select: none;
+}
+.app-shell .event-row.clickable:hover {
+  background: color-mix(in srgb, var(--color-paper-2) 80%, var(--color-accent) 20%) !important;
+}
+.app-shell .event-row.clickable:active {
+  transform: scale(0.99);
+}
+.app-shell .event-row.clickable:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.app-shell .event-row-badge-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+.app-shell .event-row-arrow {
+  color: var(--color-ink-2);
+  display: inline-flex;
+  align-items: center;
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+.app-shell .event-row.clickable:hover .event-row-arrow {
+  transform: translateX(3px);
+  color: var(--color-accent);
+}
+
+/* Interactive Topbar Pill */
+.app-shell .topbar-env.clickable {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  border: 1px solid var(--color-rule);
+  background: var(--color-paper-3);
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--color-ink-2);
+  transition: all 0.16s ease;
+}
+.app-shell .topbar-env.clickable:hover {
+  border-color: var(--color-accent);
+  color: var(--color-ink);
+  transform: translateY(-1px);
+}
+.app-shell .topbar-env.clickable .live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-positive-ink);
+  display: inline-block;
+}
+.app-shell .topbar-env.clickable.live-active .live-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
+}
+.app-shell .topbar-env.clickable.demo-active .live-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+}
+
+/* Inspector Modal */
+.app-shell .inspector-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 11, 18, 0.65);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 20px;
+}
+.app-shell .inspector-card {
+  width: min(640px, 94vw);
+  background: var(--color-paper);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  padding: clamp(20px, 3.5vw, 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: inspector-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes inspector-fade-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.app-shell .inspector-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-rule);
+  padding-bottom: 16px;
+}
+.app-shell .inspector-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.app-shell .inspector-header-left h3 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--color-ink) !important;
+}
+.app-shell .inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+.app-shell .inspector-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.app-shell .inspector-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.app-shell .inspector-stat strong {
+  font-size: 13.5px;
+  color: var(--color-ink);
+}
+.app-shell .inspector-detail-box {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: 10px;
+  padding: 14px;
+}
+.app-shell .inspector-detail-box p {
+  margin: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  color: var(--color-ink);
+  line-height: 1.55;
+  word-break: break-all;
+}
+.app-shell .inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-rule);
+}

@@ -93,6 +93,20 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         pass
     consumer_task = None
     dbms_task = None
+    os_task = None
+
+    # Continuous automatic OS process and resource monitor (Person 1 collector)
+    async def _consume_os_poller():
+        from app.api import routes_os_events as _os_routes
+        while True:
+            try:
+                await asyncio.sleep(4.0)
+                _os_routes.list_processes()
+                _os_routes.list_resource_metrics()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(5.0)
     
     # 1. Start continuous automatic DBMS observation poller
     async def _consume_dbms_poller():
@@ -232,6 +246,7 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         dbms_task = asyncio.create_task(_consume_dbms_poller())
+        os_task = asyncio.create_task(_consume_os_poller())
     except Exception:
         pass
 
@@ -391,6 +406,8 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         consumer_task.cancel()
     if dbms_task:
         dbms_task.cancel()
+    if os_task:
+        os_task.cancel()
 
     # Shutdown: stop the adapter if it was started.
     adapter = getattr(application.state, "os_adapter", None)

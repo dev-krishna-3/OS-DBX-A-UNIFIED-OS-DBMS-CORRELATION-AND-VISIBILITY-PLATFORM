@@ -269,6 +269,7 @@ function App() {
   const [sampleMode, setSampleMode] = useState(false);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState('Round Robin');
   const [theme, setTheme] = useState<ThemeId>('original');
+  const [inspectingEvent, setInspectingEvent] = useState<ActivityEvent | null>(null);
   const [tone, setTone] = useState<ToneId>('light');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -459,7 +460,16 @@ function App() {
         time: formatTimeShort(obs.observed_at),
         source: 'DBMS',
         title: `${String(obs.query_type ?? 'SQL')} observation #${String(obs.observation_id ?? '')}`,
-        detail: `${String(obs.query_text ?? '').slice(0, 68)} (${Number(obs.execution_time_ms ?? 0).toFixed(1)} ms)`,
+        detail: `${String(obs.query_text ?? '').slice(0, 72)} (${Number(obs.execution_time_ms ?? 0).toFixed(1)} ms)`,
+        status: 'linked',
+      });
+    }
+    for (const tr of liveData.traces.slice(0, 4)) {
+      mapped.push({
+        time: formatTimeShort(tr.started_at ?? tr.created_at),
+        source: 'CORRELATION',
+        title: `Trace #${tr.trace_id ?? 'link'}: PID ${tr.pid ?? 'N/A'} ↔ Tx ${tr.transaction_id ?? 'N/A'}`,
+        detail: String(tr.summary ?? 'Identity bridge direct socket link'),
         status: 'linked',
       });
     }
@@ -481,8 +491,20 @@ function App() {
         status: 'observed',
       });
     }
+    // If osEvents hasn't received new events yet, map live running Windows processes
+    if (liveData.processes.length > 0 && liveData.osEvents.length === 0) {
+      for (const proc of liveData.processes.slice(0, 5)) {
+        mapped.push({
+          time: 'Active now',
+          source: 'OS',
+          title: `Process observed · ${String(proc.name ?? 'system_process')}`,
+          detail: `PID ${proc.pid} · State: ${String(proc.state ?? 'RUNNING').toLowerCase()} · User: ${String(proc.user ?? 'system')}`,
+          status: 'observed',
+        });
+      }
+    }
     return mapped.length > 0 ? mapped : sampleEvents;
-  }, [sampleMode, liveData.dbmsObservations, liveData.osEvents, liveData.filesystemEvents]);
+  }, [sampleMode, liveData.dbmsObservations, liveData.traces, liveData.osEvents, liveData.filesystemEvents, liveData.processes]);
 
   const title = section === 'overview' ? pageMeta.overview.title : (headings[activeTab] ?? pageMeta[section].title);
   const filteredEvents = useMemo(
@@ -695,7 +717,25 @@ function App() {
                 </div>
               )}
             </div>
-            <span className="topbar-env">{liveData.connected && !sampleMode ? 'Live telemetry' : 'Demo dataset'}</span>
+            <button
+              type="button"
+              className={`topbar-env clickable ${liveData.connected && !sampleMode ? 'live-active' : 'demo-active'}`}
+              onClick={() => {
+                if (!liveData.connected) {
+                  void refreshLiveWorkspace(true);
+                } else {
+                  setSampleMode((prev) => {
+                    const next = !prev;
+                    notify(next ? 'Switched to demonstration sample dataset.' : 'Switched to live system telemetry stream.');
+                    return next;
+                  });
+                }
+              }}
+              title="Click to toggle live telemetry / demo dataset"
+            >
+              <span className={`live-dot ${liveData.connected && !sampleMode ? 'pulse' : ''}`} />
+              {liveData.connected ? (sampleMode ? 'Demo dataset (Click for Live)' : 'Live telemetry') : 'Reconnecting...'}
+            </button>
             <button type="button" className="profile-mini" aria-label={`Open administration for ${currentUser.username}`} onClick={() => openSection('admin')}><span className="profile-avatar" aria-hidden="true" /> {currentUser.username}</button>
           </div>
           </div>
@@ -788,7 +828,7 @@ function App() {
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
             transition={{ duration: prefersReducedMotion ? 0 : 0.18, ease: 'easeOut' }}>
             {section === 'overview'
-              ? <Overview events={filteredEvents} liveData={liveData} sampleMode={sampleMode} guidedStep={guidedStep} onRunDemo={() => { setSection('observatory'); setActiveTab('Unified console'); setGuidedStep(0); }} onNextStep={() => setGuidedStep((step) => (step + 1) % 5)} onOpen={(id) => openSection(id)} />
+              ? <Overview events={filteredEvents} liveData={liveData} sampleMode={sampleMode} guidedStep={guidedStep} onRunDemo={() => { setSection('observatory'); setActiveTab('Unified console'); setGuidedStep(0); }} onNextStep={() => setGuidedStep((step) => (step + 1) % 5)} onOpen={(id) => openSection(id)} onSelectEvent={(ev) => setInspectingEvent(ev)} />
               : <FeaturePage section={section} tab={activeTab} onSelectTab={setActiveTab} events={filteredEvents} liveData={liveData} onRefresh={refreshLiveWorkspace} search={search} selectedAlgorithm={selectedAlgorithm} onAlgorithm={setSelectedAlgorithm} onAction={notify} sampleMode={sampleMode} onToggleSample={() => setSampleMode((value) => !value)} guidedStep={guidedStep} onNextStep={() => setGuidedStep((step) => Math.min(step + 1, 4))} currentUser={currentUser} onSignOut={() => { authApi.signOut(); setCurrentUser(null); }} />}
           </m.div>
           </AnimatePresence>
@@ -796,6 +836,101 @@ function App() {
           <footer className="page-footer"><span>OS-DBX Unified Forensic Observability Platform · Real-time causal visibility</span><span>{liveData.connected && !sampleMode ? 'Operational · All collectors streaming' : 'Demo workspace'}</span></footer>
         </main>
       </div>
+
+      {inspectingEvent && (
+        <div className="inspector-overlay" onClick={() => setInspectingEvent(null)} role="dialog" aria-modal="true" aria-label="Event Inspector">
+          <div className="inspector-card" onClick={(e) => e.stopPropagation()}>
+            <div className="inspector-header">
+              <div className="inspector-header-left">
+                <span className={`event-source source-${inspectingEvent.source.toLowerCase()}`}>
+                  {inspectingEvent.source === 'OS' ? 'OS Activity' : inspectingEvent.source === 'DBMS' ? 'Database' : 'Correlation'}
+                </span>
+                <h3>{inspectingEvent.title}</h3>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setInspectingEvent(null)} aria-label="Close inspector">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="inspector-body">
+              <div className="inspector-grid">
+                <div className="inspector-stat">
+                  <span className="inspector-label">Observed Timestamp</span>
+                  <strong>{inspectingEvent.time}</strong>
+                </div>
+                <div className="inspector-stat">
+                  <span className="inspector-label">Causal Verification Status</span>
+                  <span className={`state-label state-${inspectingEvent.status}`}>
+                    {inspectingEvent.status === 'linked' ? 'Direct Identity Bridge' : inspectingEvent.status === 'attention' ? 'Requires Forensic Review' : 'Observed Telemetry'}
+                  </span>
+                </div>
+                <div className="inspector-stat">
+                  <span className="inspector-label">System Layer</span>
+                  <strong>
+                    {inspectingEvent.source === 'OS' ? 'Windows Host Kernel (psutil differential)' : inspectingEvent.source === 'DBMS' ? 'MySQL Performance Schema' : 'Cross-Layer Socket Correlator'}
+                  </strong>
+                </div>
+                <div className="inspector-stat">
+                  <span className="inspector-label">Evidence Classification</span>
+                  <strong>
+                    {inspectingEvent.source === 'CORRELATION' ? 'DIRECT (TCP Socket ↔ PID)' : inspectingEvent.source === 'DBMS' ? 'Statement Digest & Latency' : 'Real Process / Thread / FS'}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="inspector-detail-box">
+                <span className="inspector-label">Technical Observation Payload</span>
+                <p>{inspectingEvent.detail}</p>
+              </div>
+            </div>
+
+            <div className="inspector-actions">
+              {inspectingEvent.source === 'OS' && (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => {
+                    setInspectingEvent(null);
+                    openSection('observatory');
+                    setActiveTab('Process & resources');
+                  }}
+                >
+                  <Monitor size={15} /> Inspect Process in Live Observatory <ArrowRight size={15} />
+                </button>
+              )}
+              {inspectingEvent.source === 'DBMS' && (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => {
+                    setInspectingEvent(null);
+                    openSection('observatory');
+                    setActiveTab('DBMS observations');
+                  }}
+                >
+                  <Database size={15} /> Inspect Query in Live Observatory <ArrowRight size={15} />
+                </button>
+              )}
+              {inspectingEvent.source === 'CORRELATION' && (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => {
+                    setInspectingEvent(null);
+                    openSection('correlation');
+                    setActiveTab('Explorer');
+                  }}
+                >
+                  <GitBranch size={15} /> Trace Identity Bridge in Explorer <ArrowRight size={15} />
+                </button>
+              )}
+              <button type="button" className="button button-secondary" onClick={() => setInspectingEvent(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <AnimatePresence>
         {notice && <m.div className="toast" role="status" key="notice"
           initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
@@ -810,7 +945,7 @@ function App() {
   );
 }
 
-function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onRunDemo, onNextStep, onOpen }: { events: ActivityEvent[]; liveData: LiveWorkspaceData; sampleMode: boolean; guidedStep: number; onRunDemo: () => void; onNextStep: () => void; onOpen: (id: SectionId) => void }) {
+function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onRunDemo, onNextStep, onOpen, onSelectEvent }: { events: ActivityEvent[]; liveData: LiveWorkspaceData; sampleMode: boolean; guidedStep: number; onRunDemo: () => void; onNextStep: () => void; onOpen: (id: SectionId) => void; onSelectEvent?: (event: ActivityEvent) => void }) {
   const osCount = !sampleMode && (liveData.osEvents.length + liveData.filesystemEvents.length) > 0
     ? String(liveData.osEvents.length + liveData.filesystemEvents.length)
     : '1,284';
@@ -852,7 +987,7 @@ function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onR
     <div className="overview-grid">
       <section className="surface-panel activity-panel">
         <div className="panel-heading"><div><h3>Activity across layers</h3><p>{liveData.connected && !sampleMode ? 'Live streaming events across system layers' : 'Sample events across system layers'}</p></div><button type="button" className="button button-quiet" onClick={() => onOpen('observatory')}>Open event stream <ArrowRight size={14} /></button></div>
-        <EventList events={visibleEvents.slice(0, 5)} />
+        <EventList events={visibleEvents.slice(0, 5)} onSelectEvent={onSelectEvent} />
       </section>
       <section className="surface-panel incidents-panel">
         <div className="panel-heading"><div><h3>Quick CLI-parity workbenches</h3><p>Launch interactive labs with live output rendering</p></div><span className="panel-count">{incidentsCount}</span></div>
@@ -868,11 +1003,63 @@ function Metric({ label, value, change, detail, up }: { label: string; value: st
   return <div className="metric-block"><div className="metric-top"><span className="metric-label">{label}</span></div><div className="metric-value-row"><strong>{value}</strong><span className={`metric-change ${up ? 'positive' : ''}`}>{up ? <ArrowUpRight size={13} /> : null}{change}</span></div><span className="metric-detail">{detail}</span></div>;
 }
 
-function EventList({ events: eventRows }: { events: ActivityEvent[] }) {
-  return <div className="event-list">{eventRows.length === 0 ? <EmptyState icon="search" title="No events match this filter" description="Try adjusting your search terms or verify active OS & DBMS collector streaming status." /> : eventRows.map((event, index) => <div className="event-row" key={`${event.time}-${index}`}>
-    <time>{event.time}</time><span className={`event-source source-${event.source.toLowerCase()}`}>{event.source === 'OS' ? 'OS activity' : event.source === 'DBMS' ? 'Database' : 'Correlation'}</span><span className={`event-mark mark-${event.status}`} />
-    <span className="event-copy"><strong>{event.title}</strong><small>{event.detail}</small></span>{event.status === 'linked' ? <span className="state-label state-linked">Linked</span> : event.status === 'attention' ? <span className="state-label state-review">Review</span> : <span className="state-label state-observed">Observed</span>}
-  </div>)}</div>;
+function EventList({
+  events: eventRows,
+  onSelectEvent,
+}: {
+  events: ActivityEvent[];
+  onSelectEvent?: (event: ActivityEvent) => void;
+}) {
+  return (
+    <div className="event-list" role="feed" aria-label="Activity events across system layers">
+      {eventRows.length === 0 ? (
+        <EmptyState
+          icon="search"
+          title="No events match this filter"
+          description="Try adjusting your search terms or verify active OS & DBMS collector streaming status."
+        />
+      ) : (
+        eventRows.map((event, index) => (
+          <div
+            className={`event-row clickable ${onSelectEvent ? 'interactive' : ''}`}
+            key={`${event.time}-${index}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelectEvent?.(event)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelectEvent?.(event);
+              }
+            }}
+            title="Click to inspect cross-layer forensic evidence"
+          >
+            <time>{event.time}</time>
+            <span className={`event-source source-${event.source.toLowerCase()}`}>
+              {event.source === 'OS' ? 'OS activity' : event.source === 'DBMS' ? 'Database' : 'Correlation'}
+            </span>
+            <span className={`event-mark mark-${event.status}`} />
+            <span className="event-copy">
+              <strong>{event.title}</strong>
+              <small>{event.detail}</small>
+            </span>
+            <div className="event-row-badge-group">
+              {event.status === 'linked' ? (
+                <span className="state-label state-linked">Linked</span>
+              ) : event.status === 'attention' ? (
+                <span className="state-label state-review">Review</span>
+              ) : (
+                <span className="state-label state-observed">Observed</span>
+              )}
+              <span className="event-row-arrow" aria-hidden="true">
+                <ChevronRight size={14} />
+              </span>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 
 function FeaturePage({ section, tab, onSelectTab, events: visibleEvents, liveData, onRefresh, search, selectedAlgorithm, onAlgorithm, onAction, sampleMode, onToggleSample, guidedStep, onNextStep, currentUser, onSignOut }: {
