@@ -548,13 +548,17 @@ function App() {
     [combinedActivityEvents, search],
   );
 
-  const openSection = (id: SectionId) => {
+  const openSection = (id: SectionId, tab?: string) => {
     if (id === 'admin' && !currentUser?.is_admin) {
       notify('Access Denied: Administration is restricted to administrator accounts.');
       return;
     }
     setSection(id);
-    setActiveTab(tabs[id][0]);
+    if (tab && tabs[id]?.includes(tab)) {
+      setActiveTab(tab);
+    } else {
+      setActiveTab(tabs[id][0]);
+    }
     setSearch('');
     setNotificationsOpen(false);
     setPaletteOpen(false);
@@ -712,50 +716,188 @@ function App() {
                 <Bell size={18} />
                 {(liveData.incidents.length > 0 || liveData.auditLogs.length > 0) && <span className="notifications-badge" />}
               </button>
-              {notificationsOpen && (
-                <div className="notifications-popover" role="dialog" aria-label="Notifications">
-                  <div className="notifications-header">
-                    <h3>System Alerts & Notifications</h3>
-                    <button type="button" className="button button-quiet" onClick={() => { void refreshLiveWorkspace(true); setNotificationsOpen(false); }}>
-                      <RefreshCw size={13} /> Refresh
-                    </button>
-                  </div>
-                  <div className="notification-item">
-                    <Activity size={16} color="#7665bd" />
-                    <div className="notification-content">
-                      <strong>System Health Status: {liveData.systemHealth?.overhead?.observability_status ?? 'Operational'}</strong>
-                      <p>CPU {liveData.systemHealth?.system?.cpu_percent ?? 12}% · Memory {liveData.systemHealth?.system?.memory_percent ?? 42}%</p>
-                      <time>{formatTimeShort(liveData.systemHealth?.timestamp ?? Date.now())}</time>
-                    </div>
-                  </div>
-                  <div className="notification-item">
-                    <ShieldAlert size={16} color={liveData.incidents.length > 0 ? '#bb5746' : '#2f6298'} />
-                    <div className="notification-content">
-                      <strong>{liveData.incidents.length > 0 ? `${liveData.incidents.length} Deadlock Incidents Recorded` : 'Zero Unresolved Deadlocks'}</strong>
-                      <p>{liveData.incidents.length > 0 ? 'Wait-for cycle detected. Forensics and replay available.' : 'Active deadlock detector monitoring lock acquisition queues.'}</p>
-                      <time>Active</time>
-                    </div>
-                  </div>
-                  <div className="notification-item">
-                    <Monitor size={16} color="#3b82f6" />
-                    <div className="notification-content">
-                      <strong>Filesystem & Kernel Process Telemetry Stream</strong>
-                      <p>{liveData.osStatus?.status === 'RUNNING' || liveData.osStatus?.is_active ? 'Active stream capturing process creation and file events.' : 'Stream collector operational.'}</p>
-                      <time>Live</time>
-                    </div>
-                  </div>
-                  {currentUser.is_admin && liveData.auditLogs.length > 0 && (
-                    <div className="notification-item">
-                      <LockKeyhole size={16} color="#059669" />
-                      <div className="notification-content">
-                        <strong>Security Audit Trail Active</strong>
-                        <p>Last entry: {String(liveData.auditLogs[0]?.action ?? 'SESSION_VERIFY')} by {String(liveData.auditLogs[0]?.username ?? 'user')}</p>
-                        <time>{formatTimeShort(liveData.auditLogs[0]?.timestamp ?? Date.now())}</time>
+              <AnimatePresence>
+                {notificationsOpen && (
+                  <m.div
+                    key="notifications-popover"
+                    className="notifications-popover"
+                    role="dialog"
+                    aria-label="Notifications"
+                    initial={{ opacity: 0, y: -10, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                    transition={{ duration: 0.18, ease: 'easeOut' }}
+                  >
+                    <div className="notifications-header">
+                      <div className="notifications-header-title">
+                        <h3>System Alerts &amp; Notifications</h3>
+                        <span className="notification-badge-pill live">
+                          <span className="notification-pulse-dot" /> Live
+                        </span>
                       </div>
+                      <button
+                        type="button"
+                        className="button button-quiet"
+                        disabled={isSyncing}
+                        onClick={async () => {
+                          await refreshLiveWorkspace(true);
+                          notify('Real-time telemetry and alerts synchronized.');
+                        }}
+                      >
+                        <RefreshCw size={13} className={isSyncing ? 'spin' : ''} /> Refresh
+                      </button>
                     </div>
-                  )}
-                </div>
-              )}
+
+                    <div className="notifications-list">
+                      {/* 1. System Health Status */}
+                      <m.button
+                        type="button"
+                        className="notification-item clickable"
+                        whileHover={{ scale: 1.012, x: 2 }}
+                        whileTap={{ scale: 0.985 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                        onClick={() => {
+                          openSection('performance', 'System health');
+                          notify('Navigating to System Health: Monitoring CPU, memory, and database overhead.');
+                        }}
+                      >
+                        <div className="notification-icon-wrap" style={{ color: '#7665bd', background: 'rgba(118, 101, 189, 0.12)' }}>
+                          <Activity size={16} />
+                        </div>
+                        <div className="notification-content">
+                          <div className="notification-meta-row">
+                            <strong>System Health Status: {liveData.systemHealth?.overhead?.observability_status ?? 'NORMAL'}</strong>
+                            <span className="notification-badge-pill info">
+                              <span className="notification-pulse-dot" /> Telemetry
+                            </span>
+                          </div>
+                          <p>CPU {liveData.systemHealth?.system?.cpu_percent ?? 12}% · Memory {liveData.systemHealth?.system?.memory_percent ?? 42}%</p>
+                          <time>{formatTimeShort(liveData.systemHealth?.timestamp ?? Date.now())}</time>
+                        </div>
+                        <ChevronRight size={15} className="notification-arrow" />
+                      </m.button>
+
+                      {/* 2. Deadlock Incidents Recorded */}
+                      <m.button
+                        type="button"
+                        className="notification-item clickable"
+                        whileHover={{ scale: 1.012, x: 2 }}
+                        whileTap={{ scale: 0.985 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                        onClick={() => {
+                          openSection('incidents', 'Deadlocks');
+                          notify(liveData.incidents.length > 0
+                            ? `Navigating to Incident Center: ${liveData.incidents.length} active deadlock investigations available.`
+                            : 'Navigating to Incident Center: Active deadlock scanner operational.');
+                        }}
+                      >
+                        <div className="notification-icon-wrap" style={{
+                          color: liveData.incidents.length > 0 ? '#bb5746' : '#2f6298',
+                          background: liveData.incidents.length > 0 ? 'rgba(187, 87, 70, 0.14)' : 'rgba(47, 98, 152, 0.12)'
+                        }}>
+                          <ShieldAlert size={16} />
+                        </div>
+                        <div className="notification-content">
+                          <div className="notification-meta-row">
+                            <strong>{liveData.incidents.length > 0 ? `${liveData.incidents.length} Deadlock Incidents Recorded` : 'Zero Unresolved Deadlocks'}</strong>
+                            <span className={`notification-badge-pill ${liveData.incidents.length > 0 ? 'alert' : 'info'}`}>
+                              <span className="notification-pulse-dot" /> {liveData.incidents.length > 0 ? 'Active' : 'Clear'}
+                            </span>
+                          </div>
+                          <p>{liveData.incidents.length > 0 ? 'Wait-for cycle detected. Forensics and replay available.' : 'Active deadlock detector monitoring lock acquisition queues.'}</p>
+                          <time>{liveData.incidents.length > 0 ? 'Action required' : 'Monitoring'}</time>
+                        </div>
+                        <ChevronRight size={15} className="notification-arrow" />
+                      </m.button>
+
+                      {/* 3. Filesystem & Kernel Process Telemetry Stream */}
+                      <m.button
+                        type="button"
+                        className="notification-item clickable"
+                        whileHover={{ scale: 1.012, x: 2 }}
+                        whileTap={{ scale: 0.985 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                        onClick={() => {
+                          openSection('observatory', 'OS activity');
+                          notify('Navigating to Live Observatory: Real-time kernel process & filesystem event stream.');
+                        }}
+                      >
+                        <div className="notification-icon-wrap" style={{ color: '#3b82f6', background: 'rgba(59, 130, 246, 0.12)' }}>
+                          <Monitor size={16} />
+                        </div>
+                        <div className="notification-content">
+                          <div className="notification-meta-row">
+                            <strong>Filesystem &amp; Kernel Process Telemetry Stream</strong>
+                            <span className="notification-badge-pill live">
+                              <span className="notification-pulse-dot" /> Live
+                            </span>
+                          </div>
+                          <p>{liveData.osStatus?.status === 'RUNNING' || liveData.osStatus?.is_active ? 'Active stream capturing process creation and file events.' : 'Stream collector operational.'}</p>
+                          <time>Live telemetry stream</time>
+                        </div>
+                        <ChevronRight size={15} className="notification-arrow" />
+                      </m.button>
+
+                      {/* 4. Security Audit Trail Active */}
+                      {currentUser?.is_admin ? (
+                        <m.button
+                          type="button"
+                          className="notification-item clickable"
+                          whileHover={{ scale: 1.012, x: 2 }}
+                          whileTap={{ scale: 0.985 }}
+                          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                          onClick={() => {
+                            openSection('admin', 'Audit log');
+                            notify('Navigating to Security & Compliance: Viewing administrative audit log.');
+                          }}
+                        >
+                          <div className="notification-icon-wrap" style={{ color: '#059669', background: 'rgba(5, 150, 105, 0.12)' }}>
+                            <LockKeyhole size={16} />
+                          </div>
+                          <div className="notification-content">
+                            <div className="notification-meta-row">
+                              <strong>Security Audit Trail Active</strong>
+                              <span className="notification-badge-pill secure">
+                                <span className="notification-pulse-dot" /> Audit
+                              </span>
+                            </div>
+                            <p>Last entry: {String(liveData.auditLogs[0]?.action ?? 'SESSION_VERIFY')} by {String(liveData.auditLogs[0]?.username ?? 'admin')}</p>
+                            <time>{formatTimeShort(liveData.auditLogs[0]?.timestamp ?? Date.now())}</time>
+                          </div>
+                          <ChevronRight size={15} className="notification-arrow" />
+                        </m.button>
+                      ) : (
+                        <m.button
+                          type="button"
+                          className="notification-item clickable"
+                          whileHover={{ scale: 1.012, x: 2 }}
+                          whileTap={{ scale: 0.985 }}
+                          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                          onClick={() => {
+                            setNotificationsOpen(false);
+                            notify(`Cross-layer session active: signed in as ${currentUser?.username ?? 'user'} (${currentUser?.is_admin ? 'Admin' : 'Member'}).`);
+                          }}
+                        >
+                          <div className="notification-icon-wrap" style={{ color: '#059669', background: 'rgba(5, 150, 105, 0.12)' }}>
+                            <LockKeyhole size={16} />
+                          </div>
+                          <div className="notification-content">
+                            <div className="notification-meta-row">
+                              <strong>Session Authenticated &amp; Protected</strong>
+                              <span className="notification-badge-pill secure">
+                                <span className="notification-pulse-dot" /> Verified
+                              </span>
+                            </div>
+                            <p>Cross-layer identity mapped for {currentUser?.username ?? 'user'} ({currentUser?.is_admin ? 'Admin' : 'Member'}).</p>
+                            <time>Active</time>
+                          </div>
+                          <ChevronRight size={15} className="notification-arrow" />
+                        </m.button>
+                      )}
+                    </div>
+                  </m.div>
+                )}
+              </AnimatePresence>
             </div>
             <button
               type="button"
