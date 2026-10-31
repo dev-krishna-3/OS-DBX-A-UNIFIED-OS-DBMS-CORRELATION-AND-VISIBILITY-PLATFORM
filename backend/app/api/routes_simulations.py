@@ -22,10 +22,12 @@ from os_monitor.simulations.scheduling.sjf import sjf
 from os_monitor.simulations.scheduling.round_robin import round_robin
 from os_monitor.simulations.scheduling.priority import priority_scheduling
 from os_monitor.simulations.scheduling.srtf import srtf
+from os_monitor.simulations.scheduling.mlfq import mlfq
 
 from os_monitor.simulations.memory.fifo import fifo
 from os_monitor.simulations.memory.lru import lru
 from os_monitor.simulations.memory.optimal import optimal
+from os_monitor.simulations.memory.clock import clock
 
 from os_monitor.simulations.deadlock.bankers import bankers_algorithm
 from os_monitor.simulations.deadlock.resource_graph import detect_deadlock
@@ -106,10 +108,12 @@ def run_scheduling_simulation(req: SchedulingRequest) -> Dict[str, Any]:
             res = round_robin(build_procs(), quantum=req.quantum or 2)
         elif algo in ("PRIORITY", "PRIORITY SCHEDULING"):
             res = priority_scheduling(build_procs())
+        elif algo in ("MLFQ", "MULTI-LEVEL FEEDBACK QUEUE", "MULTI_LEVEL_FEEDBACK_QUEUE"):
+            res = mlfq(build_procs(), quantum=req.quantum or 2)
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported algorithm '{req.algorithm}'. Use FCFS, SJF, SRTF, RR, or PRIORITY."
+                detail=f"Unsupported algorithm '{req.algorithm}'. Use FCFS, SJF, SRTF, RR, PRIORITY, or MLFQ."
             )
 
         # Convert result dataclass to dictionary
@@ -210,6 +214,18 @@ def run_memory_simulation(req: MemoryRequest) -> Dict[str, Any]:
             }
         elif algo in ("OPTIMAL", "OPT"):
             res = optimal(req.reference_string, req.num_frames)
+            ret = {
+                "algorithm": res.algorithm,
+                "reference_string": res.reference_string,
+                "num_frames": res.num_frames,
+                "page_faults": res.page_faults,
+                "page_hits": res.page_hits,
+                "fault_rate": res.fault_rate,
+                "hit_rate": res.hit_rate,
+                "frame_states": res.frame_states
+            }
+        elif algo in ("CLOCK", "SECOND CHANCE", "CLOCK (SECOND CHANCE)"):
+            res = clock(req.reference_string, req.num_frames)
             ret = {
                 "algorithm": res.algorithm,
                 "reference_string": res.reference_string,
@@ -397,6 +413,14 @@ def run_disk_simulation(req: DiskSchedulingRequest) -> Dict[str, Any]:
         higher = sorted([t for t in raw_tracks if t >= current])
         lower = sorted([t for t in raw_tracks if t < current])
         ordered_tracks = higher + lower
+    elif algo == "LOOK":
+        higher = sorted([t for t in raw_tracks if t >= current])
+        lower = sorted([t for t in raw_tracks if t < current], reverse=True)
+        ordered_tracks = higher + lower
+    elif algo in ("C-LOOK", "CLOOK"):
+        higher = sorted([t for t in raw_tracks if t >= current])
+        lower = sorted([t for t in raw_tracks if t < current])
+        ordered_tracks = higher + lower
     else:
         ordered_tracks = raw_tracks
 
@@ -448,8 +472,23 @@ class SyncSimulationRequest(BaseModel):
 def run_sync_simulation(req: SyncSimulationRequest) -> Dict[str, Any]:
     """Simulate synchronization problem and persist to synchronization_experiments table."""
     log = []
-    for i in range(1, req.iterations + 1):
-        log.append(f"Step {i}: Producer produced item #{i} -> Consumer consumed item #{i}")
+    p_type = (req.problem_type or "PRODUCER_CONSUMER").upper()
+    if "READER" in p_type or "WRITER" in p_type:
+        for i in range(1, req.iterations + 1):
+            if i % 3 == 0:
+                log.append(f"Step {i}: Writer #{i // 3} acquired Exclusive Lock (w_mutex) -> Wrote record -> Released lock")
+            else:
+                log.append(f"Step {i}: Reader #{i} acquired Shared Lock (read_count={i % 2 + 1}) -> Read record -> Released lock")
+    elif "PHILOSOPHER" in p_type or "DINING" in p_type:
+        num_phil = 5
+        for i in range(1, req.iterations + 1):
+            p_id = ((i - 1) % num_phil) + 1
+            left_c = p_id
+            right_c = (p_id % num_phil) + 1
+            log.append(f"Step {i}: Philosopher P{p_id} acquired Chopstick #{left_c} & #{right_c} -> Eating state -> Released chopsticks")
+    else:
+        for i in range(1, req.iterations + 1):
+            log.append(f"Step {i}: Producer produced item #{i} -> Consumer consumed item #{i}")
     log_text = "\n".join(log)
     
     try:

@@ -12,6 +12,7 @@ import AuthPage from './features/auth/AuthPage';
 import { analysisApi, authApi, correlationApi, hasAccessToken, incidentsApi, observabilityApi, simulationsApi, workflowsApi } from './api';
 import type { AuthUser } from './api/auth';
 import EmptyState from './components/EmptyState';
+import { Simulation3DViewer } from './components/Simulation3DViewer';
 
 const iconMap = {
   grid: LayoutDashboard, activity: Activity, nodes: Waypoints, shield: ShieldAlert,
@@ -2978,7 +2979,14 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
     try {
       if (tab === 'OS simulations') {
         if (lab === 'CPU Scheduling') {
-          const algoMap: Record<string, string> = { 'FCFS': 'FCFS', 'SJF': 'SJF', 'SRTF': 'SRTF', 'Round Robin': 'RR', 'Priority': 'PRIORITY' };
+          const algoMap: Record<string, string> = {
+            'FCFS': 'FCFS',
+            'SJF': 'SJF',
+            'SRTF': 'SRTF',
+            'Round Robin': 'RR',
+            'Priority': 'PRIORITY',
+            'Multi-Level Feedback Queue (MLFQ)': 'MLFQ',
+          };
           const parsedProcs = cpuProcessesInput
             .split('\n')
             .map((line, i) => {
@@ -2993,7 +3001,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
             .filter((p) => p.burst_time > 0);
 
           const res = await simulationsApi.schedule<CpuSimResult>({
-            algorithm: algoMap[activeAlgorithm] ?? 'RR',
+            algorithm: algoMap[activeAlgorithm] ?? (activeAlgorithm.includes('MLFQ') ? 'MLFQ' : 'RR'),
             quantum: Math.max(1, cpuQuantum),
             processes: parsedProcs.length > 0 ? parsedProcs : [
               { pid: 1, arrival_time: 0, burst_time: 6, priority: 2 },
@@ -3008,7 +3016,7 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
 
         if (lab === 'Memory & page replacement') {
           const refs = memRefString.split(/[,;\s]+/).map((s) => Number(s.trim())).filter((n) => !Number.isNaN(n));
-          const algoKey = activeAlgorithm.toUpperCase().includes('COMPARE') ? 'ALL' : activeAlgorithm.toUpperCase();
+          const algoKey = activeAlgorithm.includes('Clock') ? 'CLOCK' : activeAlgorithm.toUpperCase().includes('COMPARE') ? 'ALL' : activeAlgorithm.toUpperCase();
           const res = await simulationsApi.memory<MemorySimResult>({
             algorithm: algoKey,
             num_frames: Math.max(1, memFrames),
@@ -3071,12 +3079,17 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
         }
 
         if (lab === 'Synchronization') {
+          const pType = activeAlgorithm.includes('Readers')
+            ? 'READERS_WRITERS'
+            : activeAlgorithm.includes('Dining')
+            ? 'DINING_PHILOSOPHERS'
+            : 'PRODUCER_CONSUMER';
           const res = await simulationsApi.synchronization<SyncSimResult>({
-            problem_type: 'PRODUCER_CONSUMER',
+            problem_type: pType,
             iterations: Math.max(1, Math.min(20, syncIterations)),
           });
           setSyncOutput(res);
-          if (!silent) onAction(`Producer-Consumer Synchronization: ${res.result_log.length} steps executed.`);
+          if (!silent) onAction(`${res.problem_type} Synchronization: ${res.result_log.length} steps executed.`);
           return;
         }
       } else {
@@ -3236,7 +3249,8 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
         )}
 
         {tab === 'OS simulations' && lab === 'Synchronization' && (
-          <label className="field-label">Producer-Consumer Bounded Buffer Iterations
+          <label className="field-label">
+            {activeAlgorithm.includes('Readers') ? 'Readers-Writers Concurrency Iterations' : activeAlgorithm.includes('Dining') ? 'Dining Philosophers Cycle Iterations' : 'Producer-Consumer Bounded Buffer Iterations'}
             <input type="number" min={2} max={15} value={syncIterations} onChange={(e) => setSyncIterations(Number(e.target.value))} />
           </label>
         )}
@@ -3281,6 +3295,26 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
         <div className="panel-heading">
           <div><h3>Simulation Output Scenario</h3><p>Deterministic simulation output model</p></div>
           <span className="result-check"><Check size={15} /></span>
+        </div>
+
+        {/* Real-time 3D Interactive WebGL Virtual Lab Scene */}
+        <div style={{ marginTop: '14px', marginBottom: '16px' }}>
+          <Simulation3DViewer
+            lab={lab}
+            tab={tab}
+            algorithm={activeAlgorithm}
+            data={
+              lab === 'CPU Scheduling' ? cpuOutput :
+              lab === 'Memory & page replacement' ? memOutput :
+              lab === 'Deadlock theory' ? (bankersOutput || ragOutput) :
+              lab === 'Disk scheduling' ? diskOutput :
+              lab === 'Synchronization' ? syncOutput :
+              lab === 'Serializability' ? serialOutput :
+              lab === 'WAL recovery' ? recoveryOutput :
+              lock2plOutput
+            }
+            height={340}
+          />
         </div>
 
         {/* OS: CPU Scheduling Result */}
@@ -3818,15 +3852,15 @@ function Simulations({ tab, selectedAlgorithm, onAlgorithm, onAction }: { tab: s
 
 function labAlgorithms(tab: string, lab: string): string[] {
   if (tab === 'OS simulations') {
-    if (lab === 'Memory & page replacement') return ['FIFO', 'LRU', 'OPTIMAL', 'Compare ALL'];
-    if (lab === 'Deadlock theory') return ['Banker’s algorithm', 'Resource allocation graph'];
-    if (lab === 'Disk scheduling') return ['FCFS', 'SSTF', 'SCAN', 'C-SCAN'];
-    if (lab === 'Synchronization') return ['Producer-Consumer (Semaphores)'];
-    return ['Round Robin', 'FCFS', 'SJF', 'SRTF', 'Priority'];
+    if (lab === 'Memory & page replacement') return ['FIFO', 'LRU', 'OPTIMAL', 'Clock (Second Chance)', 'Compare ALL'];
+    if (lab === 'Deadlock theory') return ['Banker’s algorithm', 'Resource allocation graph', 'Deadlock Detection & Prevention'];
+    if (lab === 'Disk scheduling') return ['FCFS', 'SSTF', 'SCAN', 'C-SCAN', 'LOOK', 'C-LOOK'];
+    if (lab === 'Synchronization') return ['Producer-Consumer (Semaphores)', 'Readers-Writers (Shared Lock)', 'Dining Philosophers (Chopstick Mutex)'];
+    return ['Round Robin', 'FCFS', 'SJF', 'SRTF', 'Priority', 'Multi-Level Feedback Queue (MLFQ)'];
   }
-  if (lab === 'WAL recovery') return ['WAL / REDO-UNDO', 'ARIES Checkpoint recovery'];
-  if (lab === 'Strict 2PL & Deadlocks') return ['Strict 2PL Wait-For Graph'];
-  return ['Conflict Serializability & Precedence Graph'];
+  if (lab === 'WAL recovery') return ['WAL / REDO-UNDO', 'ARIES Checkpoint recovery', 'Fuzzy Checkpointing Simulation'];
+  if (lab === 'Strict 2PL & Deadlocks') return ['Strict 2PL Wait-For Graph', 'Wait-Die Deadlock Prevention', 'Wound-Wait Deadlock Preemption'];
+  return ['Conflict Serializability & Precedence Graph', 'View Serializability Verification', 'Topological Serialization Order'];
 }
 
 interface WhatIfScenarioRecord {
