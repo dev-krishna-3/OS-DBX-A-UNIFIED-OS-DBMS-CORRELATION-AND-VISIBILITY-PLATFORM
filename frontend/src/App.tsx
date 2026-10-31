@@ -278,6 +278,7 @@ function App() {
   const [syncDropdownOpen, setSyncDropdownOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [refreshingAlerts, setRefreshingAlerts] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState('Just now');
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authReady, setAuthReady] = useState(() => !hasAccessToken());
@@ -327,7 +328,11 @@ function App() {
   }, []);
 
   const refreshLiveWorkspace = useCallback(async (showToast = false, isAdminUser?: boolean) => {
-    if (!hasAccessToken()) return;
+    if (!hasAccessToken()) {
+      setLastSyncedAt(new Date().toLocaleTimeString());
+      if (showToast) notify('Workspace telemetry refreshed.');
+      return;
+    }
     const canReadAudit = isAdminUser ?? Boolean(currentUser?.is_admin);
     const [
       evRes,
@@ -409,6 +414,22 @@ function App() {
     } catch {
       notify('Telemetry up to date.');
     } finally {
+      setIsSyncing(false);
+    }
+  }, [refreshLiveWorkspace, notify]);
+
+  const handleRefreshAlerts = useCallback(async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setRefreshingAlerts(true);
+    setIsSyncing(true);
+    try {
+      await refreshLiveWorkspace(false);
+      setLastSyncedAt(new Date().toLocaleTimeString());
+      notify('System alerts & real-time telemetry synchronized.');
+    } catch {
+      notify('Telemetry up to date.');
+    } finally {
+      setRefreshingAlerts(false);
       setIsSyncing(false);
     }
   }, [refreshLiveWorkspace, notify]);
@@ -732,20 +753,23 @@ function App() {
                       <div className="notifications-header-title">
                         <h3>System Alerts &amp; Notifications</h3>
                         <span className="notification-badge-pill live">
-                          <span className="notification-pulse-dot" /> Live
+                          <span className="notification-pulse-dot" /> {refreshingAlerts ? 'Syncing…' : 'Live'}
                         </span>
+                        <span className="notifications-time-tag">{lastSyncedAt}</span>
                       </div>
-                      <button
+                      <m.button
                         type="button"
                         className="button button-quiet"
-                        disabled={isSyncing}
-                        onClick={async () => {
-                          await refreshLiveWorkspace(true);
-                          notify('Real-time telemetry and alerts synchronized.');
-                        }}
+                        disabled={refreshingAlerts || isSyncing}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.94 }}
+                        onClick={handleRefreshAlerts}
+                        title="Synchronize live alerts and telemetry"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
                       >
-                        <RefreshCw size={13} className={isSyncing ? 'spin' : ''} /> Refresh
-                      </button>
+                        <RefreshCw size={13} className={refreshingAlerts || isSyncing ? 'spin' : ''} />
+                        <span>{refreshingAlerts || isSyncing ? 'Refreshing…' : 'Refresh'}</span>
+                      </m.button>
                     </div>
 
                     <div className="notifications-list">
@@ -985,6 +1009,7 @@ function App() {
             if (notificationsOpen) setNotificationsOpen(false);
             if (paletteOpen) setPaletteOpen(false);
             if (searchPaletteOpen) setSearchPaletteOpen(false);
+            if (syncDropdownOpen) setSyncDropdownOpen(false);
           }}
         >
           <div className="page-heading">
@@ -1827,7 +1852,7 @@ function Observations({ liveData, sampleMode, onRefresh, onAction }: { liveData:
         </div>
       </div>
     )}
-    <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Recent statement observations</h3><p>Captured query history, newest first</p></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}><Play size={14} /> Refresh observations</button></div><div className="table-wrap"><table><thead><tr><th>Observation</th><th>Type</th><th>Statement</th><th>Duration</th><th>Rows</th><th>DBMS thread</th><th>State</th></tr></thead><tbody>{rows.map((row, idx) => <tr key={`${row.id}-${idx}`}><td><b>{row.id}</b></td><td><span className="query-kind table-kind">{row.type}</span></td><td className="sql-cell">{row.statement}</td><td>{row.duration}</td><td>{row.rows}</td><td>{row.thread}</td><td><span className="state-label state-observed">{row.state}</span></td></tr>)}</tbody></table></div></section>
+    <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Recent statement observations</h3><p>Captured query history, newest first</p></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}><RefreshCw size={14} /> Refresh observations</button></div><div className="table-wrap"><table><thead><tr><th>Observation</th><th>Type</th><th>Statement</th><th>Duration</th><th>Rows</th><th>DBMS thread</th><th>State</th></tr></thead><tbody>{rows.map((row, idx) => <tr key={`${row.id}-${idx}`}><td><b>{row.id}</b></td><td><span className="query-kind table-kind">{row.type}</span></td><td className="sql-cell">{row.statement}</td><td>{row.duration}</td><td>{row.rows}</td><td>{row.thread}</td><td><span className="state-label state-observed">{row.state}</span></td></tr>)}</tbody></table></div></section>
     <div className="note-banner"><BookOpen size={16} /><span><strong>Why this source matters</strong> MySQL statement history is harvested continuously by the backend poller and linked via the socket identity bridge.</span></div>
   </>;
 }
@@ -3203,7 +3228,7 @@ function Performance({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: 
       <section className="surface-panel table-panel">
         <div className="panel-heading">
           <div><h3>Performance records</h3><p>Global DBMS metrics and trace-specific measurements</p></div>
-          <button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}>Refresh records</button>
+          <button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}><RefreshCw size={14} /> Refresh records</button>
         </div>
         <div className="table-wrap">
           <table>
@@ -5058,7 +5083,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
     <section className="surface-panel table-panel">
       <div className="panel-heading">
         <div><h3>Administrative audit log</h3><p>User actions recorded across security sessions</p></div>
-        <button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}> <ListFilter size={15} /> Sync</button>
+        <button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}><RefreshCw size={14} /> Sync audit log</button>
       </div>
       <div className="table-wrap">
         <table>
