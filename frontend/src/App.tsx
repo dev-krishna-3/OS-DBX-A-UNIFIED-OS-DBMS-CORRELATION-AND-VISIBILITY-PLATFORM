@@ -458,18 +458,69 @@ function App() {
 
   const combinedActivityEvents: ActivityEvent[] = useMemo(() => {
     if (sampleMode) return sampleEvents;
-    const mapped: ActivityEvent[] = [];
-    for (const obs of liveData.dbmsObservations.slice(0, 6)) {
-      mapped.push({
+
+    const osList: ActivityEvent[] = [];
+    const dbmsList: ActivityEvent[] = [];
+    const corrList: ActivityEvent[] = [];
+
+    // 1. Map OS Events from Windows collector
+    for (const ev of liveData.osEvents.slice(0, 25)) {
+      const rawType = String(ev.event_type ?? 'process_event').replace(/_/g, ' ');
+      const pName = String(ev.process_name ?? (ev.details && typeof ev.details === 'object' ? (ev.details as Record<string, unknown>).process_name : '') ?? '');
+      const title = pName && pName !== 'null' && pName !== 'os_process'
+        ? `${rawType} · ${pName}`
+        : rawType.charAt(0).toUpperCase() + rawType.slice(1);
+      const detailParts: string[] = [];
+      if (ev.pid) detailParts.push(`PID ${String(ev.pid)}`);
+      if (ev.file_path) detailParts.push(String(ev.file_path));
+      else if (ev.user) detailParts.push(String(ev.user));
+      else detailParts.push('Host kernel event');
+
+      osList.push({
+        time: formatTimeShort(ev.timestamp ?? ev.received_at),
+        source: 'OS',
+        title,
+        detail: detailParts.join(' · '),
+        status: rawType.includes('modify') || rawType.includes('delete') ? 'attention' : 'observed',
+      });
+    }
+
+    // 2. Map Filesystem Events
+    for (const fs of liveData.filesystemEvents.slice(0, 15)) {
+      osList.push({
+        time: formatTimeShort(fs.timestamp ?? fs.received_at),
+        source: 'OS',
+        title: `File ${String(fs.event_type ?? 'modified').replace(/_/g, ' ')}`,
+        detail: String(fs.file_path ?? 'Watched filesystem path'),
+        status: 'observed',
+      });
+    }
+
+    // 3. Map Live Windows Processes
+    for (const proc of liveData.processes.slice(0, 15)) {
+      osList.push({
+        time: 'Live host',
+        source: 'OS',
+        title: `Process observed · ${String(proc.name ?? 'system_process')}`,
+        detail: `PID ${proc.pid} · State: ${String(proc.state ?? 'RUNNING').toLowerCase()}${proc.memory_rss_mb ? ` · ${proc.memory_rss_mb} MB` : ''}${proc.user ? ` · ${proc.user}` : ''}`,
+        status: 'observed',
+      });
+    }
+
+    // 4. Map DBMS Query Observations
+    for (const obs of liveData.dbmsObservations.slice(0, 25)) {
+      dbmsList.push({
         time: formatTimeShort(obs.observed_at),
         source: 'DBMS',
         title: `${String(obs.query_type ?? 'SQL')} observation #${String(obs.observation_id ?? '')}`,
-        detail: `${String(obs.query_text ?? '').slice(0, 72)} (${Number(obs.execution_time_ms ?? 0).toFixed(1)} ms)`,
+        detail: `${String(obs.query_text ?? '').slice(0, 80)} (${Number(obs.execution_time_ms ?? 0).toFixed(1)} ms)`,
         status: 'linked',
       });
     }
-    for (const tr of liveData.traces.slice(0, 4)) {
-      mapped.push({
+
+    // 5. Map Correlation Traces
+    for (const tr of liveData.traces.slice(0, 15)) {
+      corrList.push({
         time: formatTimeShort(tr.started_at ?? tr.created_at),
         source: 'CORRELATION',
         title: `Trace #${tr.trace_id ?? 'link'}: PID ${tr.pid ?? 'N/A'} ↔ Tx ${tr.transaction_id ?? 'N/A'}`,
@@ -477,37 +528,18 @@ function App() {
         status: 'linked',
       });
     }
-    for (const ev of liveData.osEvents.slice(0, 6)) {
-      mapped.push({
-        time: formatTimeShort(ev.timestamp ?? ev.received_at),
-        source: 'OS',
-        title: `${String(ev.event_type ?? 'process_event')} · ${String(ev.process_name ?? 'os_process')}`,
-        detail: `PID ${String(ev.pid ?? 'N/A')} · ${String(ev.file_path ?? ev.user ?? 'system')}`,
-        status: 'observed',
-      });
+
+    // Interleave so both OS and Database layers are balanced and prominently represented
+    const interleaved: ActivityEvent[] = [];
+    const maxLen = Math.max(osList.length, dbmsList.length, corrList.length);
+
+    for (let i = 0; i < maxLen; i++) {
+      if (i < osList.length) interleaved.push(osList[i]);
+      if (i < dbmsList.length) interleaved.push(dbmsList[i]);
+      if (i < corrList.length) interleaved.push(corrList[i]);
     }
-    for (const fs of liveData.filesystemEvents.slice(0, 4)) {
-      mapped.push({
-        time: formatTimeShort(fs.timestamp ?? fs.received_at),
-        source: 'OS',
-        title: `${String(fs.event_type ?? 'file_modified')}`,
-        detail: String(fs.file_path ?? 'Watched path'),
-        status: 'observed',
-      });
-    }
-    // If osEvents hasn't received new events yet, map live running Windows processes
-    if (liveData.processes.length > 0 && liveData.osEvents.length === 0) {
-      for (const proc of liveData.processes.slice(0, 5)) {
-        mapped.push({
-          time: 'Active now',
-          source: 'OS',
-          title: `Process observed · ${String(proc.name ?? 'system_process')}`,
-          detail: `PID ${proc.pid} · State: ${String(proc.state ?? 'RUNNING').toLowerCase()} · User: ${String(proc.user ?? 'system')}`,
-          status: 'observed',
-        });
-      }
-    }
-    return mapped.length > 0 ? mapped : sampleEvents;
+
+    return interleaved.length > 0 ? interleaved : sampleEvents;
   }, [sampleMode, liveData.dbmsObservations, liveData.traces, liveData.osEvents, liveData.filesystemEvents, liveData.processes]);
 
   const title = section === 'overview' ? pageMeta.overview.title : (headings[activeTab] ?? pageMeta[section].title);
@@ -1097,7 +1129,7 @@ function Overview({ events: visibleEvents, liveData, sampleMode, guidedStep, onR
     <div className="overview-grid">
       <section className="surface-panel activity-panel">
         <div className="panel-heading"><div><h3>Activity across layers</h3><p>{liveData.connected && !sampleMode ? 'Live streaming events across system layers' : 'Sample events across system layers'}</p></div><button type="button" className="button button-quiet" onClick={() => onOpen('observatory')}>Open event stream <ArrowRight size={14} /></button></div>
-        <EventList events={visibleEvents.slice(0, 5)} onSelectEvent={onSelectEvent} />
+        <EventList events={visibleEvents.slice(0, 6)} onSelectEvent={onSelectEvent} />
       </section>
       <section className="surface-panel incidents-panel">
         <div className="panel-heading"><div><h3>Quick CLI-parity workbenches</h3><p>Launch interactive labs with live output rendering</p></div><span className="panel-count">{incidentsCount}</span></div>
