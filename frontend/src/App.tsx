@@ -275,6 +275,7 @@ function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [searchPaletteOpen, setSearchPaletteOpen] = useState(false);
   const [syncDropdownOpen, setSyncDropdownOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState('Just now');
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -383,7 +384,9 @@ function App() {
       performanceRecords: perfRes.status === 'fulfilled' && Array.isArray(perfRes.value) ? perfRes.value : prev.performanceRecords,
       scenarios: scenRes.status === 'fulfilled' && Array.isArray(scenRes.value) ? scenRes.value : prev.scenarios,
       bridgeMap: bridgeRes.status === 'fulfilled' ? bridgeRes.value : prev.bridgeMap,
-      auditLogs: auditRes.status === 'fulfilled' && Array.isArray(auditRes.value) && auditRes.value.length > 0 ? auditRes.value : prev.auditLogs,
+      auditLogs: canReadAudit
+        ? (auditRes.status === 'fulfilled' && Array.isArray(auditRes.value) ? auditRes.value : prev.auditLogs)
+        : [],
       transactions: txRes.status === 'fulfilled' && Array.isArray(txRes.value) ? txRes.value : prev.transactions,
       locks: locksRes.status === 'fulfilled' && Array.isArray(locksRes.value) ? locksRes.value : prev.locks,
       traces: tracesRes.status === 'fulfilled' && Array.isArray(tracesRes.value) ? tracesRes.value : prev.traces,
@@ -513,6 +516,10 @@ function App() {
   );
 
   const openSection = (id: SectionId) => {
+    if (id === 'admin' && !currentUser?.is_admin) {
+      notify('Access Denied: Administration is restricted to administrator accounts.');
+      return;
+    }
     setSection(id);
     setActiveTab(tabs[id][0]);
     setSearch('');
@@ -598,7 +605,7 @@ function App() {
                     { id: 'simulations' as SectionId, tab: 'OS simulations', label: 'OS Concurrency Simulations', badge: 'Simulations' },
                     { id: 'simulations' as SectionId, tab: 'DBMS simulations', label: 'DBMS ACID Simulations', badge: 'Simulations' },
                     { id: 'whatif' as SectionId, tab: 'Schedule analysis', label: 'What-If Scenario Analysis', badge: 'What-If' },
-                    { id: 'admin' as SectionId, tab: 'Audit log', label: 'Security & Audit Logs', badge: 'Admin' },
+                    ...(currentUser?.is_admin ? [{ id: 'admin' as SectionId, tab: 'Audit log', label: 'Security & Audit Logs', badge: 'Admin' }] : []),
                   ]
                     .filter((item) => !search || item.label.toLowerCase().includes(search.toLowerCase()) || item.badge.toLowerCase().includes(search.toLowerCase()))
                     .map((item) => (
@@ -704,7 +711,7 @@ function App() {
                       <time>Live</time>
                     </div>
                   </div>
-                  {liveData.auditLogs.length > 0 && (
+                  {currentUser.is_admin && liveData.auditLogs.length > 0 && (
                     <div className="notification-item">
                       <LockKeyhole size={16} color="#059669" />
                       <div className="notification-content">
@@ -736,11 +743,27 @@ function App() {
               <span className={`live-dot ${liveData.connected && !sampleMode ? 'pulse' : ''}`} />
               {liveData.connected ? (sampleMode ? 'Demo dataset (Click for Live)' : 'Live telemetry') : 'Reconnecting...'}
             </button>
-            <button type="button" className="profile-mini" aria-label={`Open administration for ${currentUser.username}`} onClick={() => openSection('admin')}><span className="profile-avatar" aria-hidden="true" /> {currentUser.username}</button>
+            <button
+              type="button"
+              className="profile-mini"
+              aria-label={`Open account profile for ${currentUser.username}`}
+              onClick={() => {
+                setProfileModalOpen(true);
+                setNotificationsOpen(false);
+                setSearchPaletteOpen(false);
+                setPaletteOpen(false);
+                setSyncDropdownOpen(false);
+              }}
+            >
+              <span className="profile-avatar" aria-hidden="true" /> {currentUser.username}
+            </button>
           </div>
           </div>
           <nav id="primary-navigation" className="primary-nav" aria-label="Main navigation">
-            {sidebarGroups.flatMap((group) => group.items).map((item) => {
+            {sidebarGroups
+              .flatMap((group) => group.items)
+              .filter((item) => item.id !== 'admin' || Boolean(currentUser?.is_admin))
+              .map((item) => {
               const Icon = iconMap[item.icon as keyof typeof iconMap];
               return <button type="button" key={item.id} className={`primary-nav-item ${section === item.id ? 'active' : ''}`} onClick={() => openSection(item.id)} aria-current={section === item.id ? 'page' : undefined}>
                 <Icon size={16} strokeWidth={1.8} /><span>{item.label}</span>{item.id === 'incidents' && <span className="nav-count">{incidentCount}</span>}
@@ -816,7 +839,7 @@ function App() {
             </div>
           </div>
 
-          {section !== 'overview' && <div className="tabs-bar" role="tablist" aria-label={`${pageMeta[section].title} views`}>
+          {section !== 'overview' && (section !== 'admin' || Boolean(currentUser?.is_admin)) && <div className="tabs-bar" role="tablist" aria-label={`${pageMeta[section].title} views`}>
             {tabs[section].map((tab) => <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} className={`view-tab ${activeTab === tab ? 'selected' : ''}`} onClick={() => setActiveTab(tab)}>{tab}</button>)}
           </div>}
 
@@ -927,6 +950,92 @@ function App() {
               <button type="button" className="button button-secondary" onClick={() => setInspectingEvent(null)}>
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profileModalOpen && (
+        <div className="inspector-overlay" onClick={() => setProfileModalOpen(false)} role="dialog" aria-modal="true" aria-label="Account Profile">
+          <div className="inspector-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+            <div className="inspector-header">
+              <div className="inspector-header-left">
+                <span className="event-source" style={{ width: 'auto', padding: '3px 10px', background: currentUser.is_admin ? 'rgba(99, 102, 241, 0.15)' : 'rgba(16, 185, 129, 0.15)', color: currentUser.is_admin ? '#818cf8' : '#34d399' }}>
+                  {currentUser.is_admin ? 'Administrator Role' : 'Member Role'}
+                </span>
+                <h3>Account Profile</h3>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setProfileModalOpen(false)} aria-label="Close profile">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="account-profile" style={{ margin: '8px 0 16px' }}>
+              <div className="account-avatar" style={{ width: '48px', height: '48px', fontSize: '16px' }}>
+                {currentUser.username.slice(0, 2).toUpperCase()}
+              </div>
+              <div style={{ marginLeft: '12px' }}>
+                <strong style={{ fontSize: '16px', color: 'var(--color-ink)' }}>{currentUser.username}</strong>
+                <small style={{ color: 'var(--color-ink-2)', fontSize: '13px' }}>{currentUser.email ?? 'No email address registered'}</small>
+              </div>
+            </div>
+
+            <div className="inspector-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
+              <div className="inspector-stat">
+                <span className="inspector-label">System Identity (Host UID)</span>
+                <strong>UID {currentUser.uid_linux ?? 1000}</strong>
+              </div>
+              <div className="inspector-stat">
+                <span className="inspector-label">Access Level</span>
+                <span className={`state-label ${currentUser.is_admin ? 'state-linked' : 'state-observed'}`}>
+                  {currentUser.is_admin ? 'System Administrator' : 'Standard Member (Read-Only)'}
+                </span>
+              </div>
+              <div className="inspector-stat">
+                <span className="inspector-label">Security Role</span>
+                <strong>{currentUser.is_admin ? 'admin' : 'member'}</strong>
+              </div>
+              <div className="inspector-stat">
+                <span className="inspector-label">Session Status</span>
+                <strong style={{ color: '#10b981' }}>Active (JWT Authenticated)</strong>
+              </div>
+            </div>
+
+            <div className="inspector-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
+              {currentUser.is_admin ? (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => {
+                    setProfileModalOpen(false);
+                    openSection('admin');
+                  }}
+                >
+                  <Settings size={15} /> Administration Console
+                </button>
+              ) : (
+                <span style={{ fontSize: '12px', color: 'var(--color-ink-subtle)' }}>
+                  Standard member telemetry access
+                </span>
+              )}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="button button-danger"
+                  style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                  onClick={() => {
+                    authApi.signOut();
+                    setCurrentUser(null);
+                    setProfileModalOpen(false);
+                    notify('Signed out successfully.');
+                  }}
+                >
+                  Sign out
+                </button>
+                <button type="button" className="button button-secondary" onClick={() => setProfileModalOpen(false)}>
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1075,7 +1184,26 @@ function FeaturePage({ section, tab, onSelectTab, events: visibleEvents, liveDat
   if (section === 'performance') return <Performance tab={tab} liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} />;
   if (section === 'simulations') return <Simulations tab={tab} selectedAlgorithm={selectedAlgorithm} onAlgorithm={onAlgorithm} onAction={onAction} />;
   if (section === 'whatif') return <WhatIf tab={tab} liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} />;
-  return <Administration tab={tab} liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} onToggleSample={onToggleSample} currentUser={currentUser} onSignOut={onSignOut} />;
+  if (section === 'admin') {
+    if (!currentUser.is_admin) {
+      return (
+        <section className="surface-panel" style={{ padding: '48px 24px', textAlign: 'center', margin: '24px auto', maxWidth: '600px' }}>
+          <div style={{ display: 'inline-flex', padding: '16px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', marginBottom: '16px' }}>
+            <ShieldAlert size={36} />
+          </div>
+          <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px', color: 'var(--color-ink)' }}>Access Denied</h2>
+          <p style={{ color: 'var(--color-ink-subtle)', lineHeight: 1.6, marginBottom: '20px' }}>
+            Administrator privileges are required to access security audit logs and workspace administration. Your current role is <strong>Member</strong>.
+          </p>
+          <button type="button" className="button button-primary" onClick={() => onAction('Administration is restricted to system administrators.')}>
+            Return to Dashboard
+          </button>
+        </section>
+      );
+    }
+    return <Administration tab={tab} liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} onToggleSample={onToggleSample} currentUser={currentUser} onSignOut={onSignOut} />;
+  }
+  return null;
 }
 
 interface DemoCorrelationResultInner {
@@ -4001,15 +4129,32 @@ function WhatIf({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: strin
 }
 
 function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onToggleSample, currentUser, onSignOut }: { tab: string; liveData: LiveWorkspaceData; sampleMode: boolean; onRefresh: (toast?: boolean) => Promise<void>; onAction: (message: string) => void; onToggleSample: () => void; currentUser: AuthUser; onSignOut: () => void }) {
-  const [auditActionInput, setAuditActionInput] = useState('MANUAL_SECURITY_VERIFICATION');
+  const [auditActionInput, setAuditActionInput] = useState('SYSTEM_HEALTH_CHECK');
   const [localAuditEntries, setLocalAuditEntries] = useState<Array<{ time: string; user: string; action: string; detail: string; source: string }>>([]);
+
+  if (!currentUser.is_admin) {
+    return (
+      <section className="surface-panel" style={{ padding: '48px 24px', textAlign: 'center', margin: '24px auto', maxWidth: '600px' }}>
+        <div style={{ display: 'inline-flex', padding: '16px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', marginBottom: '16px' }}>
+          <ShieldAlert size={36} />
+        </div>
+        <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px', color: 'var(--color-ink)' }}>Access Denied</h2>
+        <p style={{ color: 'var(--color-ink-subtle)', lineHeight: 1.6, marginBottom: '20px' }}>
+          Administrator privileges are required to access security audit logs. Your current role is <strong>Member</strong>.
+        </p>
+        <button type="button" className="button button-primary" onClick={() => onAction('Administration is restricted to system administrators.')}>
+          Return to Dashboard
+        </button>
+      </section>
+    );
+  }
 
   if (tab === 'Accounts & sign-in') return <AccountSettings user={currentUser} onSignOut={onSignOut} />;
 
   const handleEmitAudit = async () => {
     try {
-      const actionName = auditActionInput || 'WORKSPACE_CHECK';
-      const detailText = `UID ${currentUser.uid_linux ?? 1000} · Role: ${currentUser.is_admin ? 'Admin' : 'Member'}`;
+      const actionName = auditActionInput || 'SECURITY_AUDIT_VERIFICATION';
+      const detailText = `UID ${currentUser.uid_linux ?? 0} · Role: Administrator`;
       const res = await workflowsApi.createAuditEntry<{ status?: string; message?: string }>({
         user_id: currentUser.user_id,
         username: currentUser.username,
@@ -4027,9 +4172,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
         },
         ...prev,
       ]);
-      if (currentUser.is_admin) {
-        await onRefresh(false);
-      }
+      await onRefresh(false);
       onAction(`${res.message ?? 'Audit entry recorded'} (${actionName}).`);
     } catch (err) {
       onAction(err instanceof Error ? err.message : 'Could not record audit entry.');
@@ -4041,14 +4184,15 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
         formatTimeShort(log.created_at ?? log.timestamp),
         String(log.username ?? currentUser.username),
         String(log.action ?? 'Action'),
-        String(log.details ?? `UID ${String(log.uid_linux ?? 1000)}`),
+        String(log.details ?? `UID ${String(log.uid_linux ?? 0)}`),
         'Security Engine',
       ])
-    : [
-        ['Live', currentUser.username, 'SESSION_AUTHENTICATED', `UID ${currentUser.uid_linux ?? 1000} · Role: ${currentUser.is_admin ? 'Admin' : 'Member'}`, 'Auth Engine'],
-        ['10:41:55', 'alex.demo', 'OPENED_INCIDENT_018', 'Forensic timeline inspected', 'Workspace'],
-        ['10:38:02', 'admin', 'SYSTEM_HEALTH_CHECK', 'Verified collector status', 'Security Engine'],
-      ];
+    : sampleMode
+    ? [
+        ['10:41:55', 'admin', 'SYSTEM_AUDIT_LOG_ROTATION', 'Security audit log retention cycle verified', 'Security Engine'],
+        ['10:38:02', 'admin', 'SYSTEM_HEALTH_CHECK', 'Verified collector status and host telemetry', 'Security Engine'],
+      ]
+    : [];
 
   const auditRows = [
     ...localAuditEntries.map((e) => [e.time, e.user, e.action, e.detail, e.source]),
@@ -4059,7 +4203,7 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
     <section className="surface-panel output-scenario-panel" style={{ marginBottom: '12px' }}>
       <div className="panel-heading">
         <div><h3>Record Cross-Layer Security Audit Entry</h3><p>Log a signed security audit entry linking OS UID and session credentials</p></div>
-        <span className="event-tag tag-lavender">{currentUser.is_admin ? 'Admin Read/Write' : 'Member Write-Enabled'}</span>
+        <span className="event-tag tag-lavender">Administrator Only</span>
       </div>
       <div className="preset-bar">
         <input
@@ -4072,8 +4216,34 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
       </div>
     </section>
 
-    <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Administrative audit log</h3><p>User actions recorded across security sessions</p></div><button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}> <ListFilter size={15} /> Sync</button></div><div className="table-wrap"><table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Detail</th><th>Source</th></tr></thead><tbody>{auditRows.map((row, idx) => <tr key={`${row[0]}-${idx}`}>{row.map((item, index) => <td key={index}>{item}</td>)}</tr>)}</tbody></table></div></section>
-    <section className="surface-panel preferences-panel"><div><h3>Demonstration sample override</h3><p>Toggle between live backend telemetry and static illustrative records.</p></div><label className="toggle-control"><input type="checkbox" checked={sampleMode} onChange={onToggleSample} /><span className="toggle-track" /><strong>{sampleMode ? 'Sample mode' : 'Live telemetry stream'}</strong></label></section>
+    <section className="surface-panel table-panel">
+      <div className="panel-heading">
+        <div><h3>Administrative audit log</h3><p>User actions recorded across security sessions</p></div>
+        <button type="button" className="button button-secondary" onClick={() => void onRefresh(true)}> <ListFilter size={15} /> Sync</button>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Detail</th><th>Source</th></tr></thead>
+          <tbody>
+            {auditRows.length > 0 ? (
+              auditRows.map((row, idx) => (
+                <tr key={`${row[0]}-${idx}`}>{row.map((item, index) => <td key={index}>{item}</td>)}</tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: 'var(--color-ink-subtle)' }}>
+                  No security audit records logged yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section className="surface-panel preferences-panel">
+      <div><h3>Demonstration sample override</h3><p>Toggle between live backend telemetry and static illustrative records.</p></div>
+      <label className="toggle-control"><input type="checkbox" checked={sampleMode} onChange={onToggleSample} /><span className="toggle-track" /><strong>{sampleMode ? 'Sample mode' : 'Live telemetry stream'}</strong></label>
+    </section>
   </>;
 }
 

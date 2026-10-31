@@ -22,15 +22,22 @@ async def create_audit_log(
     log_data: AuditLogCreate,
     current_user: UserInDB = Depends(get_current_user)
 ):
-    """Create a new audit log entry. Anyone logged in can create logs."""
+    """Create a new audit log entry. Strictly restricted to administrators."""
+    if not is_user_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Administrator role required to record security audit logs.",
+        )
     connection = get_connection()
     try:
         cursor = connection.cursor()
+        uid_val = log_data.user_id or (current_user.get("user_id") if isinstance(current_user, dict) else getattr(current_user, "user_id", None)) or 1
+        uname_val = log_data.username or (current_user.get("username") if isinstance(current_user, dict) else getattr(current_user, "username", "admin"))
         cursor.execute(
             "INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, %s, %s)",
             (
-                log_data.user_id or current_user.user_id, 
-                log_data.username or current_user.username, 
+                uid_val, 
+                uname_val, 
                 log_data.action, 
                 log_data.details
             )

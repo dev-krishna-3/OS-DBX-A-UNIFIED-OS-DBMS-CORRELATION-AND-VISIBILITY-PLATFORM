@@ -64,17 +64,27 @@ def test_authenticated_endpoints_and_aliases():
 
 
 def test_audit_authorization_rbac():
-    """Verify non-admin users cannot access audit logs (403), but admin users can (200)."""
+    """Verify non-admin users cannot read OR write audit logs (403), but admin users can."""
     # 1. Non-admin user (from default conftest override: testuser, uid 1000)
-    r_non_admin = client.get("/api/audit/?limit=5")
-    assert r_non_admin.status_code == 403
-    assert "Access Denied: Admin privileges required" in r_non_admin.json()["detail"]
+    # Reading audit logs
+    r_non_admin_get = client.get("/api/audit/?limit=5")
+    assert r_non_admin_get.status_code == 403
+    assert "Access Denied" in r_non_admin_get.json()["detail"]
+
+    # Writing audit logs as non-admin
+    r_non_admin_post = client.post("/api/audit/", json={"action": "ILLEGAL_MEMBER_ACTION", "details": "trying to audit"})
+    assert r_non_admin_post.status_code == 403
+    assert "Access Denied" in r_non_admin_post.json()["detail"]
 
     # 2. Admin user
     app.dependency_overrides[get_current_user] = lambda: {"username": "admin", "uid_linux": 0, "is_admin": True}
     try:
-        r_admin = client.get("/api/audit/?limit=5")
-        assert r_admin.status_code == 200
-        assert isinstance(r_admin.json(), list)
+        r_admin_get = client.get("/api/audit/?limit=5")
+        assert r_admin_get.status_code == 200
+        assert isinstance(r_admin_get.json(), list)
+
+        r_admin_post = client.post("/api/audit/", json={"action": "ADMIN_VERIFIED_CHECK", "details": "authorized admin audit"})
+        assert r_admin_post.status_code == 201
+        assert r_admin_post.json()["status"] == "success"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
