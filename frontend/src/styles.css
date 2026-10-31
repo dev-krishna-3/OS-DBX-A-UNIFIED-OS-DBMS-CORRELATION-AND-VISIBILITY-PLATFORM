@@ -2576,3 +2576,194 @@ button:disabled, button[aria-disabled="true"], input:disabled, select:disabled, 
   padding-top: 12px;
   border-top: 1px solid var(--color-rule);
 }
+
+/* What-If Scenario Enhanced Visuals & Larger High-Contrast Typography */
+.app-shell .whatif-output-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.app-shell .whatif-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--color-rule);
+  background: var(--color-paper-2);
+}
+
+.app-shell .whatif-banner.pass {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #10b981;
+}
+
+.app-shell .whatif-banner.warn {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+}
+
+.app-shell .whatif-banner.info {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.35);
+  color: #3b82f6;
+}
+
+.app-shell .whatif-banner-text strong {
+  display: block;
+  font-size: 16.5px !important;
+  font-weight: 700;
+  color: var(--color-ink) !important;
+  margin-bottom: 4px;
+}
+
+.app-shell .whatif-banner-text p {
+  margin: 0;
+  font-size: 13.5px !important;
+  line-height: 1.55;
+  color: var(--color-ink-2) !important;
+}
+
+.app-shell .whatif-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.app-shell .whatif-kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+}
+
+.app-shell .whatif-kpi-card .kpi-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.app-shell .whatif-kpi-card .kpi-val {
+  font-size: 20px;
+  font-weight: 800;
+  font-family: var(--font-display, sans-serif);
+  color: var(--color-ink);
+}
+
+.app-shell .whatif-kpi-card .kpi-sub {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.app-shell .whatif-meter-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+}
+
+.app-shell .whatif-meter-bar {
+  height: 12px;
+  width: 100%;
+  border-radius: 6px;
+  background: var(--color-rule);
+  overflow: hidden;
+  position: relative;
+}
+
+.app-shell .whatif-meter-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-shell .whatif-graph-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+}
+
+.app-shell .whatif-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-rule);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.app-shell .whatif-node.active-cycle {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.app-shell .result-pairs span {
+  font-size: 13.5px !important;
+  color: var(--color-ink-2) !important;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--color-rule);
+}
+
+.app-shell .result-pairs b {
+  font-size: 13.5px !important;
+  color: var(--color-ink) !important;
+  font-weight: 600;
+}
+
+.app-shell .whatif-result strong {
+  font-size: 18px !important;
+  color: var(--color-ink) !important;
+}
+
+.app-shell .whatif-result p {
+  font-size: 13.5px !important;
+  line-height: 1.6 !important;
+  color: var(--color-ink-2) !important;
+}
+
+.app-shell .code-block-card strong {
+  font-size: 13.5px !important;
+  color: var(--color-ink) !important;
+}
+
+.app-shell .code-block-card pre {
+  font-size: 12.5px !important;
+  line-height: 1.6 !important;
+  color: var(--color-ink) !important;
+  background: var(--color-paper-2) !important;
+}
+
+.app-shell .verdict-banner strong {
+  font-size: 15.5px !important;
+  color: var(--color-ink) !important;
+}
+
+.app-shell .verdict-banner span {
+  font-size: 13px !important;
+  color: var(--color-ink-2) !important;
+}
