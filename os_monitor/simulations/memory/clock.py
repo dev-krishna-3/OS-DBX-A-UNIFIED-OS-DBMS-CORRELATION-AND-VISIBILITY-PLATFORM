@@ -67,3 +67,4 @@ def clock(reference_string: List[int], num_frames: int) -> PageReplacementResult
         hit_rate=round(page_hits / total, 4) if total > 0 else 0.0,
         frame_states=frame_states,
     )
+

@@ -160,3 +160,4 @@ def mlfq(processes: List[Process], quantum: int = 2) -> SchedulerResult:
         cpu_utilization=round((busy_time / time) * 100, 2) if time > 0 else 0.0,
         throughput=round(n / time, 4) if time > 0 else 0.0,
     )
+

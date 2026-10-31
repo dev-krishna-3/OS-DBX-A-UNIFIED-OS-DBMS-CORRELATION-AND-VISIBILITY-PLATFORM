@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'framer-motion';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Check,
   ChevronDown, ChevronRight, CircleHelp, Clock3, Contrast, Cpu, Database, FileClock,
   FlaskConical, GitBranch, HardDrive, LayoutDashboard, ListFilter, LockKeyhole,
-  MemoryStick, Monitor, Moon, Network, Palette, Play, RefreshCw, Search, Settings, ShieldAlert, Sparkles,
+  MemoryStick, Monitor, Moon, Network, Palette, Pause, Play, RefreshCw, RotateCcw, Search, Settings, ShieldAlert, Sparkles,
   Sun, Waypoints, X,
 } from 'lucide-react';
 import { events as sampleEvents, observations as sampleObservations, pageMeta, scenarioNames, sidebarGroups, type ActivityEvent, type SectionId } from './data/demo';
@@ -1515,8 +1515,19 @@ function LayerDiagram({ compact = false }: { compact?: boolean }) {
   </div>;
 }
 
-function EvidenceItem({ icon, title, detail, badge, tone }: { icon: React.ReactNode; title: string; detail: string; badge: string; tone: string }) {
-  return <div className="evidence-item"><span className={`evidence-icon ${tone}`}>{icon}</span><span><strong>{title}</strong><small>{detail}</small></span><em>{badge}</em></div>;
+function EvidenceItem({ icon, title, detail, badge, tone, onClick }: { icon: React.ReactNode; title: string; detail: string; badge: string; tone: string; onClick?: () => void }) {
+  return (
+    <div
+      className="evidence-item"
+      onClick={onClick}
+      style={onClick ? { cursor: 'pointer' } : undefined}
+      title={onClick ? `Click to inspect ${title}` : undefined}
+    >
+      <span className={`evidence-icon ${tone}`}>{icon}</span>
+      <span><strong>{title}</strong><small>{detail}</small></span>
+      <em>{badge}</em>
+    </div>
+  );
 }
 
 function OSActivity({ events: eventRows, liveData, sampleMode, search, onRefresh, onAction }: { events: ActivityEvent[]; liveData: LiveWorkspaceData; sampleMode: boolean; search: string; onRefresh: (toast?: boolean) => Promise<void>; onAction: (message: string) => void }) {
@@ -2289,6 +2300,17 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
   const [blastData, setBlastData] = useState<Record<string, unknown> | null>(null);
   const [replayData, setReplayData] = useState<Record<string, unknown> | null>(null);
   const [replayStep, setReplayStep] = useState<number>(5);
+  const [isPlayingTimeline, setIsPlayingTimeline] = useState<boolean>(false);
+  const playTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (playTimerRef.current) {
+        window.clearInterval(playTimerRef.current);
+        playTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (liveData.incidents.length > 0 && !liveData.incidents.some((inc) => Number(inc.incident_id) === selectedIncidentId)) {
@@ -2335,6 +2357,7 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
   };
 
   const loadBlastRadius = async (id: number) => {
+    setSelectedIncidentId(id);
     try {
       const res = await incidentsApi.blastRadius<Record<string, unknown>>(id);
       setBlastData(res);
@@ -2345,6 +2368,7 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
   };
 
   const executeForensicReplay = async (id: number) => {
+    setSelectedIncidentId(id);
     try {
       const res = await incidentsApi.replay<Record<string, unknown>>(id);
       setReplayData(res);
@@ -2363,6 +2387,46 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
     }
   };
 
+  const handleTogglePlayTimeline = () => {
+    const rawSteps = Array.isArray(replayData?.steps) ? (replayData?.steps as Array<Record<string, unknown>>) : [];
+    const totalSteps = (!sampleMode && rawSteps.length > 0) ? rawSteps.length : 5;
+
+    if (isPlayingTimeline) {
+      if (playTimerRef.current) {
+        window.clearInterval(playTimerRef.current);
+        playTimerRef.current = null;
+      }
+      setIsPlayingTimeline(false);
+      onAction('Timeline playback paused.');
+      return;
+    }
+
+    // If at or past the end, start from step 1
+    let cur = replayStep >= totalSteps ? 1 : replayStep;
+    setReplayStep(cur);
+    setIsPlayingTimeline(true);
+    onAction(`Playing forensic timeline (Step ${cur} of ${totalSteps})...`);
+
+    if (playTimerRef.current) {
+      window.clearInterval(playTimerRef.current);
+    }
+
+    playTimerRef.current = window.setInterval(() => {
+      cur += 1;
+      if (cur <= totalSteps) {
+        setReplayStep(cur);
+        onAction(`Forensic replay: Step ${cur} of ${totalSteps} executed`);
+      } else {
+        if (playTimerRef.current) {
+          window.clearInterval(playTimerRef.current);
+          playTimerRef.current = null;
+        }
+        setIsPlayingTimeline(false);
+        onAction(`Forensic replay for INC-${String(selectedIncidentId).padStart(3, '0')} complete (${totalSteps} steps).`);
+      }
+    }, 850);
+  };
+
   if (tab === 'Investigation') {
     const invIncident = (investigationData?.incident as Record<string, unknown> | undefined) ?? liveData.incidents.find((i) => Number(i.incident_id) === selectedIncidentId);
     const invTrace = investigationData?.trace as Record<string, unknown> | undefined;
@@ -2371,9 +2435,13 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
     const invLocks = Array.isArray(investigationData?.locks) ? (investigationData?.locks as Array<Record<string, unknown>>) : [];
 
     const timelineItems: Array<[string, string, string, string]> = !sampleMode && invTimelineRaw.length > 0
-      ? invTimelineRaw.map((ev) => {
+      ? invTimelineRaw.map((ev, idx) => {
           const evType = String(ev.event_type ?? 'EVENT');
-          const layer = String(ev.layer ?? 'DBMS');
+          const src = String(ev.source ?? ev.layer ?? 'DBMS').toUpperCase();
+          const desc = String(ev.description ?? ev.summary ?? `Timeline event #${idx + 1}`);
+          const payload = (ev.payload as Record<string, unknown> | undefined) || {};
+          const pid = ev.pid ?? payload.pid;
+          const txId = ev.transaction_id ?? payload.transaction_id;
           const tone = evType.toLowerCase().includes('deadlock')
             ? 'alert'
             : evType.toLowerCase().includes('wait') || evType.toLowerCase().includes('lock')
@@ -2383,8 +2451,8 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
                 : 'db';
           return [
             formatTimeShort(ev.timestamp),
-            `[${layer}] ${evType}`,
-            `${String(ev.summary ?? '')}${ev.pid ? ` · PID ${String(ev.pid)}` : ''}${ev.transaction_id ? ` · TX-${String(ev.transaction_id)}` : ''}`,
+            `[${src}] ${evType}`,
+            `${desc}${pid ? ` · PID ${String(pid)}` : ''}${txId ? ` · TX-${String(txId)}` : ''}`,
             tone,
           ];
         })
@@ -2400,8 +2468,29 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
         <section className="surface-panel investigation-main">
           <div className="investigation-title">
             <span className="incident-icon warn"><LockKeyhole size={17} /></span>
-            <div>
-              <span className="event-tag">{String(invIncident?.incident_type ?? 'DEADLOCK')}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px', flexWrap: 'wrap', gap: '8px' }}>
+                <span className="event-tag">{String(invIncident?.incident_type ?? 'DEADLOCK')}</span>
+                {liveData.incidents.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <small style={{ color: 'var(--color-muted)' }}>Incident:</small>
+                    {liveData.incidents.slice(0, 5).map((inc) => {
+                      const incId = Number(inc.incident_id);
+                      return (
+                        <button
+                          key={incId}
+                          type="button"
+                          className={`button ${incId === selectedIncidentId ? 'button-primary' : 'button-quiet'}`}
+                          style={{ padding: '2px 8px', fontSize: '11px', height: '24px' }}
+                          onClick={() => void loadInvestigation(incId)}
+                        >
+                          INC-{String(incId).padStart(3, '0')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               <h2>{String(invIncident?.title ?? `Deadlock contention (INC-${String(selectedIncidentId).padStart(3, '0')})`)}</h2>
               <p>Detected {formatTimeShort(invIncident?.detected_at)} · Status: {String(invIncident?.status ?? 'OPEN')} · {String(invIncident?.summary ?? 'Wait-for cycle detected across active transactions')}</p>
             </div>
@@ -2413,7 +2502,13 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
           </div>
           <div className="investigation-timeline">
             {timelineItems.map(([time, title, detail, tone], idx) => (
-              <div className={`timeline-row timeline-${tone}`} key={`${time}-${idx}`}>
+              <div
+                className={`timeline-row timeline-${tone}`}
+                key={`${time}-${idx}`}
+                onClick={() => onAction(`Timeline Event #${idx + 1} at ${time}: ${title} — ${detail}`)}
+                style={{ cursor: 'pointer' }}
+                title="Click to inspect this timeline event"
+              >
                 <time>{time}</time>
                 <span className="timeline-marker" />
                 <div><strong>{title}</strong><small>{detail}</small></div>
@@ -2430,6 +2525,7 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
             detail={invTrace ? `PID ${String(invTrace.pid ?? '—')} · ${String(invTimelineRaw.length)} events` : `${timelineItems.length} correlated events`}
             badge={invTrace?.trace_id ? `TR-${String(invTrace.trace_id)}` : invIncident?.trace_id ? `TR-${String(invIncident.trace_id)}` : 'TR-042'}
             tone="blue"
+            onClick={() => onAction(`Inspecting Cross-Layer Trace ${invTrace?.trace_id ? `TR-${String(invTrace.trace_id)}` : 'TR-042'}: PID ${String(invTrace?.pid ?? 4211)}.`)}
           />
           <EvidenceItem
             icon={<Database size={15} />}
@@ -2437,6 +2533,7 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
             detail={invTransactions.length > 0 ? invTransactions.map((t) => `TX-${String(t.transaction_id)} (${String(t.status)})`).join(', ') : 'Rolled back / Active'}
             badge={invTransactions.length > 0 ? `${invTransactions.length} TXs` : 'TX-208'}
             tone="lavender"
+            onClick={() => onAction(`Investigating transactions involved in incident: ${invTransactions.length > 0 ? invTransactions.map((t) => `TX-${String(t.transaction_id)}`).join(', ') : 'TX-208 & TX-211'}`)}
           />
           <EvidenceItem
             icon={<LockKeyhole size={15} />}
@@ -2444,6 +2541,7 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
             detail={invLocks.length > 0 ? invLocks.map((l) => `${String(l.data_item)} (${String(l.status)})`).slice(0, 3).join(', ') : 'inventory:sku:104'}
             badge={invLocks.length > 0 ? `${invLocks.length} locks` : 'Waiting'}
             tone="peach"
+            onClick={() => onAction(`Contested lock resources: ${invLocks.length > 0 ? invLocks.map((l) => String(l.data_item)).join(', ') : 'inventory:sku:104'}`)}
           />
           <button type="button" className="button button-primary full-button" onClick={() => { onSelectTab('Replay'); void executeForensicReplay(selectedIncidentId); }}>Open forensic replay <ArrowRight size={14} /></button>
           <button type="button" className="button button-secondary full-button" onClick={() => { onSelectTab('Blast radius'); void loadBlastRadius(selectedIncidentId); }}>Analyze blast radius <ArrowRight size={14} /></button>
@@ -2463,7 +2561,30 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
       <section className="surface-panel">
         <div className="panel-heading">
           <div>
-            <h3>Deadlock impact map (INC-{String(selectedIncidentId).padStart(3, '0')})</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h3>Deadlock impact map (INC-{String(selectedIncidentId).padStart(3, '0')})</h3>
+              {liveData.incidents.length > 1 && (
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {liveData.incidents.slice(0, 5).map((inc) => {
+                    const incId = Number(inc.incident_id);
+                    return (
+                      <button
+                        key={incId}
+                        type="button"
+                        className={`button ${incId === selectedIncidentId ? 'button-primary' : 'button-quiet'}`}
+                        style={{ padding: '2px 7px', fontSize: '11px', height: '22px' }}
+                        onClick={() => {
+                          setSelectedIncidentId(incId);
+                          void loadBlastRadius(incId);
+                        }}
+                      >
+                        INC-{String(incId).padStart(3, '0')}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <p>{String(blastData?.summary ?? 'Direct and potential impact computed from the wait-for graph topology')}</p>
           </div>
           <div className="heading-actions">
@@ -2477,7 +2598,12 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
           <div className="impact-graph" style={{ flexWrap: 'wrap', gap: '12px' }}>
             {directNodes.map((node, idx) => (
               <div key={`dir-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div className="impact-node impacted">
+                <div
+                  className="impact-node impacted"
+                  onClick={() => onAction(`Direct impact: ${String(node.resource_type)} ${String(node.identifier)} (${String(node.reason ?? 'in deadlock cycle')})`)}
+                  style={{ cursor: 'pointer' }}
+                  title="Click to inspect impacted resource"
+                >
                   <span>{String(node.resource_type)}: {String(node.identifier)}</span>
                   <small>{String(node.reason ?? 'Directly in deadlock cycle')}</small>
                   <b>Direct impact</b>
@@ -2490,7 +2616,12 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
             {potentialNodes.map((node, idx) => (
               <div key={`pot-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div className="impact-loop"><ArrowDownRight size={18} /><span>downstream</span></div>
-                <div className="impact-node potential">
+                <div
+                  className="impact-node potential"
+                  onClick={() => onAction(`Potential downstream impact: ${String(node.resource_type)} ${String(node.identifier)} (${String(node.reason ?? 'blocked downstream')})`)}
+                  style={{ cursor: 'pointer' }}
+                  title="Click to inspect potential resource impact"
+                >
                   <span>{String(node.resource_type)}: {String(node.identifier)}</span>
                   <small>{String(node.reason ?? 'Blocked by cycle participant')}</small>
                   <b>Potential impact</b>
@@ -2500,11 +2631,11 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
           </div>
         ) : (
           <div className="impact-graph">
-            <div className="impact-node impacted"><span>TX-208</span><small>checkout-api (PID 4211)</small><b>Direct impact</b></div>
+            <div className="impact-node impacted" onClick={() => onAction('Direct impact: TX-208 (checkout-api PID 4211) holds row lock.')} style={{ cursor: 'pointer' }}><span>TX-208</span><small>checkout-api (PID 4211)</small><b>Direct impact</b></div>
             <div className="impact-arrow"><ArrowRight size={18} /><span>holds row lock</span></div>
-            <div className="impact-node impacted"><span>TX-211</span><small>order-worker (PID 4290)</small><b>Victim / Rolled back</b></div>
+            <div className="impact-node impacted" onClick={() => onAction('Direct impact: TX-211 (order-worker PID 4290) rolled back as deadlock victim.')} style={{ cursor: 'pointer' }}><span>TX-211</span><small>order-worker (PID 4290)</small><b>Victim / Rolled back</b></div>
             <div className="impact-loop"><ArrowDownRight size={18} /><span>wait cycle detected</span></div>
-            <div className="impact-node potential"><span>TX-214</span><small>inventory-sync</small><b>Downstream wait</b></div>
+            <div className="impact-node potential" onClick={() => onAction('Downstream wait: TX-214 (inventory-sync) blocked by cycle participant.')} style={{ cursor: 'pointer' }}><span>TX-214</span><small>inventory-sync</small><b>Downstream wait</b></div>
           </div>
         )}
         <div className="impact-legend">
@@ -2550,41 +2681,134 @@ function Incidents({ tab, onSelectTab, liveData, sampleMode, onRefresh, onAction
     const rawSteps = Array.isArray(replayData?.steps) ? (replayData?.steps as Array<Record<string, unknown>>) : [];
     const hasLiveReplay = !sampleMode && rawSteps.length > 0;
     const stepLabels = hasLiveReplay
-      ? rawSteps.map((s) => `${String(s.layer ?? 'DB')}: ${String(s.event_type ?? 'STEP')}`)
-      : ['OS process', 'Transaction', 'Lock wait', 'Deadlock', 'Rollback'];
+      ? rawSteps.map((s, idx) => {
+          const evType = String(s.event_type ?? s.type ?? `STEP_${idx + 1}`);
+          const src = String(s.source ?? s.layer ?? 'DBMS').toUpperCase();
+          return `${src}: ${evType}`;
+        })
+      : ['OS: PROCESS', 'TX: BEGIN', 'DBMS: LOCK_WAIT', 'CORR: DEADLOCK', 'DBMS: ROLLBACK'];
+
     const replayEvents: ActivityEvent[] = hasLiveReplay
-      ? rawSteps.slice(0, replayStep).map((s) => ({
-          time: formatTimeShort(s.timestamp),
-          source: (String(s.layer ?? 'DBMS').toUpperCase() === 'OS' ? 'OS' : String(s.layer ?? '').toUpperCase() === 'INCIDENT' ? 'CORRELATION' : 'DBMS') as ActivityEvent['source'],
-          title: `Step #${String(s.step_number ?? 1)} · ${String(s.event_type ?? 'EVENT')}`,
-          detail: `${String(s.summary ?? '')}${s.pid ? ` (PID ${String(s.pid)})` : ''}${s.transaction_id ? ` [TX-${String(s.transaction_id)}]` : ''}`,
-          status: (String(s.layer ?? '').toUpperCase() === 'INCIDENT' ? 'attention' : 'linked') as ActivityEvent['status'],
-        }))
+      ? rawSteps.slice(0, replayStep).map((s, idx) => {
+          const stepNum = s.sequence ?? s.step_number ?? (idx + 1);
+          const evType = String(s.event_type ?? s.type ?? 'EVENT');
+          const srcStr = String(s.source ?? s.layer ?? 'DBMS').toUpperCase();
+          const desc = String(s.description ?? s.summary ?? (s.payload ? JSON.stringify(s.payload) : ''));
+          const payload = (s.payload as Record<string, unknown> | undefined) || {};
+          const pid = s.pid ?? payload.pid;
+          const txId = s.transaction_id ?? payload.transaction_id;
+          const isDeadlock = evType.toLowerCase().includes('deadlock') || evType.toLowerCase().includes('abort');
+          return {
+            time: formatTimeShort(s.timestamp),
+            source: (srcStr.includes('OS') ? 'OS' : srcStr.includes('CORR') || srcStr.includes('TRACE') ? 'CORRELATION' : 'DBMS') as ActivityEvent['source'],
+            title: `Step #${String(stepNum)} · ${evType}`,
+            detail: `${desc}${pid ? ` (PID ${String(pid)})` : ''}${txId ? ` [TX-${String(txId)}]` : ''}`,
+            status: (isDeadlock ? 'review' : 'linked') as ActivityEvent['status'],
+          };
+        })
       : sampleEvents.slice(0, replayStep);
 
     return (
       <section className="surface-panel replay-panel">
         <div className="panel-heading">
-          <div><h3>Forensic replay, INC-{String(selectedIncidentId).padStart(3, '0')}</h3><p>Deterministic playback of the investigation evidence ({replayEvents.length} of {stepLabels.length} steps)</p></div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h3>Forensic replay, INC-{String(selectedIncidentId).padStart(3, '0')}</h3>
+              {liveData.incidents.length > 1 && (
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {liveData.incidents.slice(0, 5).map((inc) => {
+                    const incId = Number(inc.incident_id);
+                    return (
+                      <button
+                        key={incId}
+                        type="button"
+                        className={`button ${incId === selectedIncidentId ? 'button-primary' : 'button-quiet'}`}
+                        style={{ padding: '2px 7px', fontSize: '11px', height: '22px' }}
+                        onClick={() => {
+                          setSelectedIncidentId(incId);
+                          void executeForensicReplay(incId);
+                        }}
+                      >
+                        INC-{String(incId).padStart(3, '0')}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <p>Deterministic playback of the investigation evidence ({replayEvents.length} of {stepLabels.length} steps)</p>
+          </div>
           <span className="event-tag tag-lavender">Read only</span>
         </div>
         <div className="replay-banner">
-          <div className="replay-play"><Play size={17} fill="currentColor" /></div>
+          <div
+            className={`replay-play ${isPlayingTimeline ? 'active' : ''}`}
+            onClick={handleTogglePlayTimeline}
+            style={{ cursor: 'pointer' }}
+            title={isPlayingTimeline ? 'Pause playback' : 'Play full timeline'}
+          >
+            {isPlayingTimeline ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}
+          </div>
           <div>
             <strong>Replay does not re-run SQL ({String(replayData?.mode ?? 'READ_ONLY')})</strong>
             <p>{String(replayData?.summary ?? 'It reconstructs the recorded timeline from linked OS and DBMS evidence.')}</p>
           </div>
-          <button type="button" className="button button-primary" onClick={() => void executeForensicReplay(selectedIncidentId)}>Play full timeline <Play size={14} fill="currentColor" /></button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              type="button"
+              className={`button ${isPlayingTimeline ? 'button-secondary' : 'button-primary'}`}
+              onClick={handleTogglePlayTimeline}
+            >
+              {isPlayingTimeline ? (
+                <>Pause timeline <Pause size={14} fill="currentColor" /></>
+              ) : (
+                <>Play full timeline <Play size={14} fill="currentColor" /></>
+              )}
+            </button>
+            <button
+              type="button"
+              className="button button-quiet"
+              title="Reset and rewind timeline to step 1"
+              onClick={() => {
+                if (playTimerRef.current) {
+                  window.clearInterval(playTimerRef.current);
+                  playTimerRef.current = null;
+                }
+                setIsPlayingTimeline(false);
+                setReplayStep(1);
+                onAction('Timeline reset to Step 1.');
+              }}
+            >
+              <RotateCcw size={14} /> Restart
+            </button>
+          </div>
         </div>
         <div className="replay-track" style={{ overflowX: 'auto' }}>
-          {stepLabels.slice(0, 8).map((label, index) => (
-            <div className="replay-step" key={`${label}-${index}`} onClick={() => setReplayStep(index + 1)} style={{ cursor: 'pointer' }}>
+          {stepLabels.map((label, index) => (
+            <div
+              className="replay-step"
+              key={`${label}-${index}`}
+              onClick={() => {
+                if (playTimerRef.current) {
+                  window.clearInterval(playTimerRef.current);
+                  playTimerRef.current = null;
+                  setIsPlayingTimeline(false);
+                }
+                setReplayStep(index + 1);
+                onAction(`Jumped to timeline Step #${index + 1} (${label})`);
+              }}
+              style={{ cursor: 'pointer' }}
+              title={`Click to jump to Step #${index + 1}: ${label}`}
+            >
               <span className={index < replayStep ? 'played' : ''}>{index + 1}</span>
               <small>{label}</small>
             </div>
           ))}
         </div>
-        <EventList events={replayEvents} />
+        <EventList
+          events={replayEvents}
+          onSelectEvent={(ev) => onAction(`Inspecting forensic event: ${ev.title} — ${ev.detail}`)}
+        />
       </section>
     );
   }
@@ -2678,12 +2902,13 @@ function Performance({ tab, liveData, sampleMode, onRefresh, onAction }: { tab: 
   const handleRecordMetric = async () => {
     setRecordingMetric(true);
     try {
+      const existingTraceId = liveData.traces && liveData.traces.length > 0 ? Number(liveData.traces[0].trace_id) : undefined;
       await analysisApi.createPerformanceRecord({
         metric_name: metricName,
         metric_value: Number(metricValue),
         metric_unit: metricUnit,
         scope: metricScope,
-        trace_id: 42,
+        trace_id: existingTraceId,
       });
       await onRefresh(false);
       onAction(`Recorded metric ${metricName}=${metricValue} ${metricUnit}.`);
