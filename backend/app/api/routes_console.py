@@ -32,6 +32,13 @@ def limit_sql_console(request: Request) -> None:
 
 _READ_ONLY = re.compile(r"^\s*(select|show|describe|desc|explain)\b", re.IGNORECASE)
 _UNSAFE_READ_CLAUSES = re.compile(r"\binto\s+(out|dump)file\b|\bfor\s+update\b|\block\s+in\s+share\s+mode\b", re.IGNORECASE)
+_FORBIDDEN_SQL = re.compile(
+    r"\b(users|device_credentials|workspace_invitations|workspace_memberships|audit_logs)\b"
+    r"|\b(mysql|information_schema|performance_schema|sys)\."
+    r"|\bsleep\s*\("
+    r"|\bbenchmark\s*\(",
+    re.IGNORECASE,
+)
 _BROWSERS = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "chrome", "firefox", "msedge", "brave"}
 
 
@@ -97,6 +104,11 @@ def run_sql_causality(request: SqlConsoleRequest) -> dict:
         )
     if _UNSAFE_READ_CLAUSES.search(query):
         raise HTTPException(status_code=400, detail="File-writing and locking clauses are not allowed.")
+    if _FORBIDDEN_SQL.search(query):
+        raise HTTPException(
+            status_code=403,
+            detail="Access to credential tables, system schemas, and resource-exhausting functions is forbidden in the SQL console.",
+        )
 
     import mysql.connector
 
@@ -130,6 +142,10 @@ def run_sql_causality(request: SqlConsoleRequest) -> dict:
         started = time.perf_counter()
         try:
             cursor = conn.cursor()
+            try:
+                cursor.execute("SET SESSION max_execution_time = 3000")
+            except Exception:
+                pass
             cursor.execute(query)
             if cursor.description:
                 columns = [d[0] for d in cursor.description]

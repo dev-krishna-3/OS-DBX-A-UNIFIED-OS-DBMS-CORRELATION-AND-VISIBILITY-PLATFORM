@@ -20,7 +20,7 @@ import threading
 
 from fastapi import APIRouter, HTTPException, Request, Query, Depends
 from app.core.auth import get_current_user, require_admin
-from app.core.tenancy import DeviceCredential, require_device_credential
+from app.core.tenancy import DeviceCredential, require_device_credential, WorkspaceAccess, get_current_workspace
 from app.api.routes_events import get_event_service
 from app.services.event_service import EventService
 
@@ -50,10 +50,11 @@ _store_lock = threading.Lock()
 @router.get("", response_model=list[StoredOSEvent], dependencies=[Depends(get_current_user)])
 def list_os_events(
     limit: int = Query(default=100, ge=1, le=500),
+    workspace: WorkspaceAccess = Depends(get_current_workspace),
     service: EventService = Depends(get_event_service),
 ) -> list[StoredOSEvent]:
     """Return recently stored OS events (alias to /api/events for API consistency)."""
-    return service.get_events(limit=limit)
+    return service.get_events(limit=limit, workspace_id=workspace.workspace_id)
 
 @router.post("", response_model=StoredOSEvent, status_code=201)
 def ingest_process_event(

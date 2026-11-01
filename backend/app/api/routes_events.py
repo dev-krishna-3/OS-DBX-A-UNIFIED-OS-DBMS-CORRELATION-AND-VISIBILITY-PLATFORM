@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config.database import get_connection
 from app.config.settings import settings
+from app.core.tenancy import WorkspaceAccess, get_current_workspace
 from app.models.events import OSEvent, StoredOSEvent
 from app.repositories.event_repository import EventRepository
 from app.services.event_service import event_service
@@ -48,10 +49,11 @@ def get_event_service() -> Iterator[EventService]:
 @router.post("", response_model=StoredOSEvent, status_code=201)
 def ingest_event(
     event: OSEvent,
+    workspace: WorkspaceAccess = Depends(get_current_workspace),
     service: EventService = Depends(get_event_service),
 ) -> StoredOSEvent:
     """Validate an incoming OS event and store it. Returns the accepted event."""
-    return service.ingest_event(event)
+    return service.ingest_event(event, workspace_id=workspace.workspace_id)
 
 
 @router.get("", response_model=list[StoredOSEvent])
@@ -62,7 +64,8 @@ def list_events(
         le=MAX_LIMIT,
         description="Max number of recent events to return.",
     ),
+    workspace: WorkspaceAccess = Depends(get_current_workspace),
     service: EventService = Depends(get_event_service),
 ) -> list[StoredOSEvent]:
     """Return recently stored events, most recent first."""
-    return service.get_events(limit=limit)
+    return service.get_events(limit=limit, workspace_id=workspace.workspace_id)

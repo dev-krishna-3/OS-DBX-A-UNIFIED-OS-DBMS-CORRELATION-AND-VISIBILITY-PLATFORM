@@ -28,13 +28,16 @@ class EventService:
         self._lock = threading.Lock()
         self._repository = repository
 
-    def ingest_event(self, event: OSEvent) -> StoredOSEvent:
+    def ingest_event(self, event: OSEvent, workspace_id: int | None = None) -> StoredOSEvent:
         """Store a validated event and return it with server-assigned metadata."""
         if self._repository is not None:
-            return self._repository.insert(event)
+            return self._repository.insert(event, workspace_id=workspace_id)
         with self._lock:
+            dump = event.model_dump()
+            if workspace_id is not None:
+                dump["workspace_id"] = workspace_id
             stored = StoredOSEvent(
-                **event.model_dump(),
+                **dump,
                 id=self._next_id,
                 received_at=datetime.now(timezone.utc),
             )
@@ -45,15 +48,18 @@ class EventService:
                 self._events = self._events[-self._max_events :]
             return stored
 
-    def get_events(self, limit: int = 50) -> list[StoredOSEvent]:
+    def get_events(self, limit: int = 50, workspace_id: int | None = None) -> list[StoredOSEvent]:
         """Return the most recently ingested events, most recent first."""
         if self._repository is not None:
-            return self._repository.recent(limit)
+            return self._repository.recent(limit, workspace_id=workspace_id)
         with self._lock:
             if limit <= 0:
                 return []
             # Most recent last in storage order -> reverse for "most recent first".
-            return list(reversed(self._events[-limit:]))
+            events = self._events
+            if workspace_id is not None:
+                events = [e for e in events if getattr(e, "workspace_id", None) in (workspace_id, None)]
+            return list(reversed(events[-limit:]))
 
 
 # Single shared instance for local development and unit tests. The API creates

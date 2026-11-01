@@ -473,6 +473,10 @@ async def limit_request_body(request, call_next):
     content_length = request.headers.get("content-length")
     if content_length and content_length.isdigit() and int(content_length) > 1_048_576:
         return PlainTextResponse("Request body too large.", status_code=413)
+    if "chunked" in request.headers.get("transfer-encoding", "").lower():
+        body = await request.body()
+        if len(body) > 1_048_576:
+            return PlainTextResponse("Request body too large.", status_code=413)
     return await call_next(request)
 
 app.add_middleware(
@@ -488,7 +492,7 @@ app.add_middleware(
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Workspace-ID"],
 )
 
 app.include_router(auth_router, prefix="/api")

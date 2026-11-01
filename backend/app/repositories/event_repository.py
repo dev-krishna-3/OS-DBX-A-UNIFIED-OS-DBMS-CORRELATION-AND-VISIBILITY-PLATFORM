@@ -20,9 +20,10 @@ class EventRepository:
     def __init__(self, connection) -> None:
         self.connection = connection
 
-    def insert(self, event: OSEvent) -> StoredOSEvent:
+    def insert(self, event: OSEvent, workspace_id: int | None = None) -> StoredOSEvent:
         cursor = self.connection.cursor()
         try:
+            ws_id = workspace_id or getattr(event, "workspace_id", None) or 1
             timestamp = _mysql_datetime(event.timestamp)
             details = json.dumps({
                 "ppid": event.ppid,
@@ -42,10 +43,10 @@ class EventRepository:
             )
             cursor.execute(
                 """
-                INSERT INTO os_events (pid, event_type, file_path, details, timestamp)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO os_events (workspace_id, pid, event_type, file_path, details, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (event.pid, event.event_type.value, event.file_path, details, timestamp),
+                (ws_id, event.pid, event.event_type.value, event.file_path, details, timestamp),
             )
             event_id = int(cursor.lastrowid)
             self.connection.commit()
@@ -60,18 +61,19 @@ class EventRepository:
         finally:
             cursor.close()
 
-    def recent(self, limit: int) -> list[StoredOSEvent]:
+    def recent(self, limit: int, workspace_id: int | None = None) -> list[StoredOSEvent]:
         cursor = self.connection.cursor(dictionary=True)
         try:
             cursor.execute(
                 """
-                SELECT event_id, pid, event_type, file_path, details, timestamp
+                SELECT event_id, pid, event_type, file_path, details, timestamp, workspace_id
                 FROM os_events
                 WHERE pid IS NOT NULL AND pid > 0
+                  AND (%s IS NULL OR workspace_id = %s)
                 ORDER BY event_id DESC
                 LIMIT %s
                 """,
-                (limit,),
+                (workspace_id, workspace_id, limit),
             )
             rows = cursor.fetchall()
             result = []
@@ -95,6 +97,7 @@ class EventRepository:
                         user=str(metadata.get("user") or "system"),
                         event_type=str(row["event_type"]),
                         file_path=row.get("file_path"),
+                        workspace_id=row.get("workspace_id"),
                         id=int(row["event_id"]),
                         received_at=row["timestamp"],
                     )

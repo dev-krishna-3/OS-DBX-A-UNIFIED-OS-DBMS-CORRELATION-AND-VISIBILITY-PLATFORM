@@ -3,6 +3,25 @@ type RequestOptions = Omit<RequestInit, 'headers'> & { headers?: HeadersInit };
 const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
 const apiBaseUrl = (rawBaseUrl || '').replace(/\/+$/, '');
 const accessTokenKey = 'osdbx_access_token';
+const workspaceIdKey = 'osdbx_workspace_id';
+
+export function getWorkspaceId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.sessionStorage.getItem(workspaceIdKey);
+}
+
+export function setWorkspaceId(id: string | number | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (id !== null && id !== undefined) {
+      window.sessionStorage.setItem(workspaceIdKey, String(id));
+    } else {
+      window.sessionStorage.removeItem(workspaceIdKey);
+    }
+  } catch {
+    // Keep in-memory
+  }
+}
 
 function readStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -43,6 +62,10 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const headers = new Headers(options.headers);
   const token = accessToken ?? readStoredToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  const workspaceId = getWorkspaceId();
+  if (workspaceId && !headers.has('X-Workspace-ID')) {
+    headers.set('X-Workspace-ID', workspaceId);
+  }
   if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }

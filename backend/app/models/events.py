@@ -81,6 +81,10 @@ class OSEvent(BaseModel):
         min_length=1,
         description="Stable identifier for the host that generated this event.",
     )
+    workspace_id: int | None = Field(
+        default=None,
+        description="Workspace ID that owns the event.",
+    )
     # Collector-reported evidence completeness, e.g. '4/5'.  This is a count
     # of satisfied deterministic checks, not a probability.
     evidence_completeness: str | None = Field(
@@ -161,6 +165,10 @@ class OSFilesystemEvent(BaseModel):
         default="localhost",
         min_length=1,
         description="Stable identifier for the host that generated this event.",
+    )
+    workspace_id: int | None = Field(
+        default=None,
+        description="Workspace ID that owns the event.",
     )
     evidence_completeness: str | None = Field(default=None)
     capture_latency_sec: float | None = Field(default=None, ge=0)
