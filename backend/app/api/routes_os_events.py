@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 
 import threading
 
-from fastapi import APIRouter, Request, Query, Depends
+from fastapi import APIRouter, HTTPException, Request, Query, Depends
+from app.core.auth import get_current_user, require_admin
+from app.core.tenancy import DeviceCredential, require_device_credential
 from app.api.routes_events import get_event_service
 from app.services.event_service import EventService
 
@@ -32,9 +34,9 @@ from app.config.settings import settings
 
 router = APIRouter(prefix="/os-events", tags=["os-events"])
 
+
 # ---------------------------------------------------------------------------
-# In-memory stores for injected events (dev/test only).
-# A durable repository would replace these when EVENT_STORAGE=mysql.
+# Bounded in-memory snapshots for memory-mode operation and recent API responses.
 # ---------------------------------------------------------------------------
 
 _process_events: list[StoredOSEvent] = []
@@ -45,7 +47,7 @@ _store_lock = threading.Lock()
 
 
 
-@router.get("", response_model=list[StoredOSEvent])
+@router.get("", response_model=list[StoredOSEvent], dependencies=[Depends(get_current_user)])
 def list_os_events(
     limit: int = Query(default=100, ge=1, le=500),
     service: EventService = Depends(get_event_service),
@@ -54,7 +56,10 @@ def list_os_events(
     return service.get_events(limit=limit)
 
 @router.post("", response_model=StoredOSEvent, status_code=201)
-def ingest_process_event(event: OSEvent) -> StoredOSEvent:
+def ingest_process_event(
+    event: OSEvent,
+    credential: DeviceCredential = Depends(require_device_credential),
+) -> StoredOSEvent:
     """Accept and store one OS process lifecycle event (pid must be non-null).
 
     This endpoint is the ingest point for ``process_created`` and
@@ -66,7 +71,7 @@ def ingest_process_event(event: OSEvent) -> StoredOSEvent:
 
     with _store_lock:
         stored = StoredOSEvent(
-            **event.model_dump(),
+            **{**event.model_dump(), "host_id": credential.device_id},
             id=_next_process_id,
             received_at=datetime.now(timezone.utc),
         )
@@ -75,6 +80,11 @@ def ingest_process_event(event: OSEvent) -> StoredOSEvent:
         # Bounded in-memory cap for development.
         if len(_process_events) > 1000:
             _process_events[:] = _process_events[-1000:]
+
+    if settings.event_storage.strip().lower() == "memory":
+        return stored
+    if settings.event_storage.strip().lower() != "mysql":
+        raise HTTPException(status_code=500, detail="EVENT_STORAGE must be 'memory' or 'mysql'.")
 
     try:
         import json
@@ -85,57 +95,65 @@ def ingest_process_event(event: OSEvent) -> StoredOSEvent:
             ts = event.timestamp
             if ts.tzinfo is not None:
                 ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
-            cur.execute(
-                """
-                INSERT INTO processes (pid, ppid, name, user, file_path, state)
-                VALUES (%s, %s, %s, %s, %s, 'RUNNING')
-                ON DUPLICATE KEY UPDATE
-                    ppid = VALUES(ppid),
-                    name = VALUES(name),
-                    user = VALUES(user),
-                    file_path = COALESCE(VALUES(file_path), file_path)
-                """,
-                (
-                    event.pid,
-                    event.ppid,
-                    event.process_name or "unknown",
-                    event.user,
-                    event.file_path,
-                ),
-            )
             details = json.dumps({
                 "event_id": event.event_id,
                 "ppid": event.ppid,
                 "user": event.user,
                 "process_name": event.process_name,
-                "host_id": event.host_id,
+                "host_id": credential.device_id,
                 "metadata": event.metadata or {},
             })
             cur.execute(
-                """
-                INSERT INTO os_events (pid, event_type, file_path, details, timestamp)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
+                """INSERT INTO os_events
+                    (workspace_id, device_id, source_event_id, received_at,
+                     pid, event_type, file_path, details, timestamp)
+                    VALUES (%s, %s, %s, UTC_TIMESTAMP(6), %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE source_event_id = VALUES(source_event_id)""",
                 (
+                    credential.workspace_id,
+                    credential.device_id,
+                    event.event_id,
                     event.pid,
-                    event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type),
+                    event.event_type.value,
                     event.file_path,
                     details,
                     ts,
                 ),
             )
+            if cur.rowcount == 0:
+                cur.execute(
+                    "SELECT event_id FROM os_events WHERE device_id = %s AND source_event_id = %s",
+                    (credential.device_id, event.event_id),
+                )
+                duplicate = cur.fetchone()
+                conn.commit()
+                if duplicate:
+                    return stored.model_copy(update={"id": int(duplicate[0])})
+            cur.execute(
+                """INSERT INTO processes
+                    (workspace_id, device_id, pid, ppid, name, state, process_started_at)
+                    VALUES (%s, %s, %s, %s, %s, %s,
+                      CASE WHEN %s = 'process_created' THEN %s ELSE NULL END)""",
+                (credential.workspace_id, credential.device_id, event.pid, event.ppid,
+                 event.process_name or "unknown",
+                 "RUNNING" if event.event_type.value == "process_created" else "TERMINATED",
+                 event.event_type.value, ts),
+            )
             conn.commit()
             cur.close()
         finally:
             conn.close()
-    except Exception:
-        pass
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="Could not persist process event.") from error
 
     return stored
 
 
 @router.post("/filesystem", response_model=StoredOSFilesystemEvent, status_code=201)
-def ingest_filesystem_event(event: OSFilesystemEvent) -> StoredOSFilesystemEvent:
+def ingest_filesystem_event(
+    event: OSFilesystemEvent,
+    credential: DeviceCredential = Depends(require_device_credential),
+) -> StoredOSFilesystemEvent:
     """Accept and store one OS filesystem event.
 
     Filesystem events intentionally carry ``pid=null``.  The OS contract
@@ -147,7 +165,7 @@ def ingest_filesystem_event(event: OSFilesystemEvent) -> StoredOSFilesystemEvent
 
     with _store_lock:
         stored = StoredOSFilesystemEvent(
-            **event.model_dump(),
+            **{**event.model_dump(), "host_id": credential.device_id},
             id=_next_filesystem_id,
             received_at=datetime.now(timezone.utc),
         )
@@ -155,6 +173,11 @@ def ingest_filesystem_event(event: OSFilesystemEvent) -> StoredOSFilesystemEvent
         _filesystem_events.append(stored)
         if len(_filesystem_events) > 1000:
             _filesystem_events[:] = _filesystem_events[-1000:]
+
+    if settings.event_storage.strip().lower() == "memory":
+        return stored
+    if settings.event_storage.strip().lower() != "mysql":
+        raise HTTPException(status_code=500, detail="EVENT_STORAGE must be 'memory' or 'mysql'.")
 
     try:
         import json
@@ -169,55 +192,67 @@ def ingest_filesystem_event(event: OSFilesystemEvent) -> StoredOSFilesystemEvent
             ev_type = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
             details = json.dumps({
                 "event_id": event.event_id,
-                "host_id": event.host_id,
+                "host_id": credential.device_id,
                 "operation": event.operation,
                 "metadata": event.metadata or {},
             })
             cur.execute(
                 """
-                INSERT INTO os_events (pid, event_type, file_path, details, timestamp)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO os_events
+                    (workspace_id, device_id, source_event_id, received_at,
+                     pid, event_type, file_path, details, timestamp)
+                VALUES (%s, %s, %s, UTC_TIMESTAMP(6), %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE source_event_id = VALUES(source_event_id)
                 """,
-                (None, ev_type, event.file_path, details, ts),
+                (credential.workspace_id, credential.device_id, event.event_id, None, ev_type, event.file_path, details, ts),
             )
+            if cur.rowcount == 0:
+                cur.execute(
+                    "SELECT event_id FROM os_events WHERE device_id = %s AND source_event_id = %s",
+                    (credential.device_id, event.event_id),
+                )
+                duplicate = cur.fetchone()
+                conn.commit()
+                if duplicate:
+                    return stored.model_copy(update={"id": int(duplicate[0])})
             if event.file_path:
                 f_path = str(event.file_path)
                 if ev_type in ("dir_created", "dir_deleted"):
                     cur.execute(
-                        "INSERT IGNORE INTO directories (path) VALUES (%s)",
-                        (f_path[:1024],),
+                        "INSERT IGNORE INTO directories (workspace_id, device_id, path) VALUES (%s, %s, %s)",
+                        (credential.workspace_id, credential.device_id, f_path[:1024]),
                     )
                 else:
                     dir_path = _os.path.dirname(f_path)
                     if dir_path:
                         cur.execute(
-                            "INSERT IGNORE INTO directories (path) VALUES (%s)",
-                            (dir_path[:1024],),
+                            "INSERT IGNORE INTO directories (workspace_id, device_id, path) VALUES (%s, %s, %s)",
+                            (credential.workspace_id, credential.device_id, dir_path[:1024]),
                         )
                     cur.execute(
                         """
-                        INSERT INTO files (file_path, file_type, size_bytes, modified_at)
+                        INSERT INTO files (workspace_id, device_id, file_path, size_bytes)
                         VALUES (%s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE modified_at = VALUES(modified_at)
+                        ON DUPLICATE KEY UPDATE size_bytes = VALUES(size_bytes)
                         """,
                         (
+                            credential.workspace_id,
+                            credential.device_id,
                             f_path[:1024],
-                            (_os.path.splitext(f_path)[1].lstrip(".") or "file")[:50],
                             0,
-                            ts,
                         ),
                     )
             conn.commit()
             cur.close()
         finally:
             conn.close()
-    except Exception:
-        pass
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="Could not persist filesystem event.") from error
 
     return stored
 
 
-@router.get("/metrics")
+@router.get("/metrics", dependencies=[Depends(get_current_user)])
 def get_stream_metrics(request: Request) -> dict:
     """Return observability metrics for the OS event stream.
 
@@ -280,7 +315,7 @@ def ensure_adapter_started(app) -> tuple[bool, str]:
         return False, f"Could not start OS watchdog adapter: {exc}"
 
 
-@router.post("/start")
+@router.post("/start", dependencies=[Depends(require_admin)])
 def start_os_collector(request: Request) -> dict:
     """Manually or dynamically start the OS watchdog filesystem collector."""
     success, message = ensure_adapter_started(request.app)
@@ -296,7 +331,7 @@ def start_os_collector(request: Request) -> dict:
     }
 
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(get_current_user)])
 def get_os_collector_status(request: Request) -> dict:
     """Return current operational status of the WindowsAdapter and Watchdog filesystem monitor."""
     adapter = getattr(request.app.state, "os_adapter", None)
@@ -318,7 +353,7 @@ def get_os_collector_status(request: Request) -> dict:
     }
 
 
-@router.get("/filesystem")
+@router.get("/filesystem", dependencies=[Depends(get_current_user)])
 def list_filesystem_events(limit: int = 50) -> list[dict]:
     """Return recent filesystem events from in-memory stream and database."""
     events = []
@@ -438,21 +473,17 @@ def _build_process_snapshot() -> list[dict]:
             for proc in sorted_res[:200]:
                 cur.execute(
                     """
-                    INSERT INTO processes (pid, ppid, name, user, file_path, state)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO processes (pid, ppid, name, state)
+                    VALUES (%s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         ppid = VALUES(ppid),
                         name = VALUES(name),
-                        user = VALUES(user),
-                        file_path = COALESCE(VALUES(file_path), file_path),
                         state = VALUES(state)
                     """,
                     (
                         proc["pid"],
                         proc.get("ppid"),
                         proc.get("name") or "unknown",
-                        proc.get("user") or "system",
-                        proc.get("file_path"),
                         str(proc.get("state") or "RUNNING")[:50],
                     ),
                 )
@@ -481,24 +512,29 @@ def _build_resource_snapshot() -> list[dict]:
                 if pid and int(pid) > 0:
                     cur.execute(
                         """
-                        INSERT IGNORE INTO processes (pid, ppid, name, user, state)
-                        VALUES (%s, 0, %s, %s, 'RUNNING')
+                        INSERT IGNORE INTO processes (pid, ppid, name, state)
+                        VALUES (%s, 0, %s, 'RUNNING')
                         """,
-                        (int(pid), m.get("name") or "unknown", m.get("user") or "system"),
+                        (int(pid), m.get("name") or "unknown"),
                     )
                     cur.execute(
-                        """
-                        INSERT INTO resource_metrics (pid, cpu_percent, memory_mb, io_read_bytes, io_write_bytes, timestamp)
-                        VALUES (%s, %s, %s, %s, %s, NOW())
-                        """,
-                        (
-                            int(pid),
-                            float(m.get("cpu_percent") or 0.0),
-                            float(m.get("memory_rss_mb") or 0.0),
-                            int(m.get("io_read_bytes") or 0),
-                            int(m.get("io_write_bytes") or 0),
-                        ),
+                        "SELECT process_id FROM processes WHERE pid = %s",
+                        (int(pid),),
                     )
+                    process_row = cur.fetchone()
+                    if process_row:
+                        cur.execute(
+                            """
+                            INSERT INTO resource_metrics (process_id, cpu_usage, memory_usage, disk_io, network_io, recorded_at)
+                            VALUES (%s, %s, %s, %s, 0, NOW())
+                            """,
+                            (
+                                process_row[0],
+                                float(m.get("cpu_percent") or 0.0),
+                                float(m.get("memory_rss_mb") or 0.0),
+                                float(m.get("io_read_bytes") or 0) + float(m.get("io_write_bytes") or 0),
+                            ),
+                        )
             conn.commit()
             cur.close()
         finally:
@@ -508,7 +544,7 @@ def _build_resource_snapshot() -> list[dict]:
     return metrics
 
 
-@router.get("/processes")
+@router.get("/processes", dependencies=[Depends(get_current_user)])
 def list_processes(limit: int = 50) -> list[dict]:
     """Return real-time running process snapshot using Person 1's collector."""
     try:
@@ -517,7 +553,7 @@ def list_processes(limit: int = 50) -> list[dict]:
         return []
 
 
-@router.get("/resources")
+@router.get("/resources", dependencies=[Depends(get_current_user)])
 def list_resource_metrics(limit: int = 50) -> list[dict]:
     """Return real-time per-process resource metrics using Person 1's collector."""
     try:

@@ -16,8 +16,11 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Depends
+from fastapi.responses import PlainTextResponse
 
 from app.api.routes_auth import router as auth_router
+from app.api.routes_workspaces import router as workspaces_router
+from app.api.routes_devices import router as devices_router
 from app.api.routes_events import router as events_router
 from app.api.routes_correlation import router as correlation_router
 from app.api.routes_deadlocks import router as deadlocks_router
@@ -47,7 +50,12 @@ def seed_admin_account() -> None:
     import os
     from app.config.database import get_connection
     from app.core.auth import get_password_hash
-    admin_password = os.environ.get("ADMIN_PASSWORD", "Admin@OSDBX2026!")
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    production = settings.environment.lower() in {"production", "prod"}
+    if production and not admin_password:
+        raise RuntimeError("ADMIN_PASSWORD must be configured in production")
+    if admin_password and len(admin_password.encode("utf-8")) < 12:
+        raise RuntimeError("ADMIN_PASSWORD must be at least 12 characters")
     try:
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
@@ -59,19 +67,37 @@ def seed_admin_account() -> None:
         cur.execute("SELECT user_id, is_admin FROM users WHERE username = 'admin'")
         row = cur.fetchone()
         if not row:
+            if not admin_password:
+                raise RuntimeError("ADMIN_PASSWORD must be configured before creating the admin account")
             hashed = get_password_hash(admin_password)
             cur.execute(
                 "INSERT INTO users (username, uid_linux, password_hash, is_admin) VALUES ('admin', 0, %s, 1)",
                 (hashed,)
             )
             conn.commit()
+        elif admin_password:
+            cur.execute(
+                "UPDATE users SET password_hash = %s, is_admin = 1, uid_linux = 0 WHERE username = 'admin'",
+                (get_password_hash(admin_password),),
+            )
+            conn.commit()
         elif not row.get("is_admin"):
             cur.execute("UPDATE users SET is_admin = 1, uid_linux = 0 WHERE username = 'admin'")
             conn.commit()
+        cur.execute(
+            """
+            INSERT IGNORE INTO workspace_memberships (workspace_id, user_id, role)
+            SELECT 1, user_id, 'owner' FROM users WHERE username = 'admin'
+            """
+        )
+        conn.commit()
         cur.close()
         conn.close()
-    except Exception:
-        pass
+    except RuntimeError:
+        raise
+    except Exception as error:
+        if production:
+            raise RuntimeError("Production account initialization failed") from error
 
 
 @asynccontextmanager
@@ -434,7 +460,20 @@ async def add_security_headers(request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Cache-Control"] = "no-store"
+    if is_production:
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
     return response
+
+
+@app.middleware("http")
+async def limit_request_body(request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > 1_048_576:
+        return PlainTextResponse("Request body too large.", status_code=413)
+    return await call_next(request)
 
 app.add_middleware(
     CORSMiddleware,
@@ -445,14 +484,16 @@ app.add_middleware(
         "http://127.0.0.1:4173",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-    ],
+    ] + settings.cors_origins,
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(auth_router, prefix="/api")
+app.include_router(workspaces_router, prefix="/api")
+app.include_router(devices_router, prefix="/api")
 
 # Protected Routes
 secure = [Depends(get_current_user)]
@@ -470,7 +511,7 @@ app.include_router(locks_router, prefix="/api", dependencies=secure)
 app.include_router(transactions_router, prefix="/api", dependencies=secure)
 app.include_router(benchmark_router, dependencies=secure)
 app.include_router(blast_radius_router, dependencies=secure)
-app.include_router(os_events_router, prefix="/api", dependencies=secure)
+app.include_router(os_events_router, prefix="/api")
 app.include_router(simulations_router, prefix="/api", dependencies=secure)
 app.include_router(audit_router, prefix="/api/audit", dependencies=secure)
 app.include_router(bridge_router, prefix="/api", dependencies=secure)

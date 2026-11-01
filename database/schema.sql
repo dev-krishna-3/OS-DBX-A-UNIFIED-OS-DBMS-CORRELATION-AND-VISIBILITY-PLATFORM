@@ -11,6 +11,89 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+# WORKSPACES AND DEVICE ACCESS CONTROL
+CREATE TABLE workspaces (
+    workspace_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    is_legacy BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_workspace_creator FOREIGN KEY (created_by) REFERENCES users(user_id)
+);
+
+CREATE TABLE workspace_memberships (
+    workspace_id BIGINT NOT NULL,
+    user_id INT NOT NULL,
+    role ENUM('owner', 'inspector') NOT NULL,
+    invited_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (workspace_id, user_id),
+    CONSTRAINT fk_membership_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+    CONSTRAINT fk_membership_user FOREIGN KEY (user_id) REFERENCES users(user_id),
+    CONSTRAINT fk_membership_inviter FOREIGN KEY (invited_by) REFERENCES users(user_id)
+);
+
+CREATE TABLE workspace_invitations (
+    invitation_id CHAR(36) PRIMARY KEY,
+    workspace_id BIGINT NOT NULL,
+    invited_user_id INT NOT NULL,
+    invited_by INT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    expires_at DATETIME(6) NOT NULL,
+    accepted_at DATETIME(6) NULL,
+    revoked_at DATETIME(6) NULL,
+    KEY idx_workspace_invited_user (workspace_id, invited_user_id, accepted_at, revoked_at),
+    CONSTRAINT fk_invitation_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+    CONSTRAINT fk_invitation_user FOREIGN KEY (invited_user_id) REFERENCES users(user_id),
+    CONSTRAINT fk_invitation_actor FOREIGN KEY (invited_by) REFERENCES users(user_id)
+);
+
+CREATE TABLE devices (
+    device_id CHAR(36) PRIMARY KEY,
+    workspace_id BIGINT NOT NULL,
+    host_id VARCHAR(255) NOT NULL,
+    display_name VARCHAR(150) NOT NULL,
+    operating_system VARCHAR(32) NOT NULL,
+    collection_scope JSON NOT NULL,
+    retention_days SMALLINT UNSIGNED NOT NULL,
+    status ENUM('pending', 'online', 'degraded', 'offline', 'revoked', 'unhealthy') NOT NULL DEFAULT 'pending',
+    last_heartbeat_at DATETIME(6) NULL,
+    last_event_at DATETIME(6) NULL,
+    enrolled_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    revoked_at DATETIME(6) NULL,
+    CONSTRAINT fk_device_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+    UNIQUE KEY uq_device_workspace_host (workspace_id, host_id),
+    KEY idx_device_workspace_status (workspace_id, status)
+);
+
+CREATE TABLE device_credentials (
+    credential_id CHAR(36) PRIMARY KEY,
+    device_id CHAR(36) NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    expires_at DATETIME(6) NULL,
+    revoked_at DATETIME(6) NULL,
+    CONSTRAINT fk_credential_device FOREIGN KEY (device_id) REFERENCES devices(device_id),
+    KEY idx_credential_device_active (device_id, revoked_at, expires_at)
+);
+
+CREATE TABLE device_access_grants (
+    workspace_id BIGINT NOT NULL,
+    device_id CHAR(36) NOT NULL,
+    user_id INT NOT NULL,
+    can_export BOOLEAN NOT NULL DEFAULT FALSE,
+    granted_by INT NOT NULL,
+    expires_at DATETIME(6) NULL,
+    revoked_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (device_id, user_id),
+    CONSTRAINT fk_grant_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+    CONSTRAINT fk_grant_device FOREIGN KEY (device_id) REFERENCES devices(device_id),
+    CONSTRAINT fk_grant_user FOREIGN KEY (user_id) REFERENCES users(user_id),
+    CONSTRAINT fk_grant_actor FOREIGN KEY (granted_by) REFERENCES users(user_id),
+    KEY idx_grant_user_active (user_id, revoked_at, expires_at)
+);
+
 
 
 # PROCESS TABLE CREATED BY "KRISHNA NITIN ANASANE"

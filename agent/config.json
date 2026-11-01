@@ -1,0 +1,7 @@
+{
+  "server_url": "https://os-dbx-api.onrender.com",
+  "host_id": "",
+  "watch_paths": ["."],
+  "poll_interval_sec": 3.0,
+  "max_batch_size": 25
+}

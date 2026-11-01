@@ -1,11 +1,15 @@
+import os
 import mysql.connector
 
 def check_processlist():
     try:
+        password = os.environ.get("MYSQL_PASSWORD")
+        if not password:
+            raise RuntimeError("Set MYSQL_PASSWORD before running this diagnostic.")
         conn = mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="krishna356",
+            host=os.environ.get("MYSQL_HOST", "localhost"),
+            user=os.environ.get("MYSQL_USER", "osdbx_app"),
+            password=password,
             database="information_schema"
         )
         cursor = conn.cursor(dictionary=True)

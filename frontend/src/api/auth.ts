@@ -26,14 +26,14 @@ export interface RegisterRequest {
 }
 
 export const authApi = {
-  async signIn(email: string, password: string, remember = true): Promise<AuthResult> {
+  async signIn(email: string, password: string): Promise<AuthResult> {
     const body = new URLSearchParams({ username: email, password });
     const result = await apiRequest<AuthResult>('/auth/token', {
       method: 'POST',
       body,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
-    setAccessToken(result.access_token, remember);
+    setAccessToken(result.access_token);
     return result;
   },
 

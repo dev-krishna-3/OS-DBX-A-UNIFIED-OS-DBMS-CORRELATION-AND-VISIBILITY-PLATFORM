@@ -167,7 +167,19 @@ def test_os_monitoring_status_endpoint(test_client):
 
 def test_identity_bridge_live_map_advisory(test_client):
     """Identity Bridge should return active mappings and administrator privilege warning if unprivileged."""
-    response = test_client.get("/api/bridge/live-map")
+    from app.core.auth import require_admin
+    app.dependency_overrides[require_admin] = lambda: {"username": "admin", "uid_linux": 0, "is_admin": True}
+    try:
+        response = test_client.get("/api/bridge/live-map")
+        assert response.status_code == 200
+        data = response.json()
+        assert "active_bridges" in data
+        assert "mapping" in data
+        assert "is_admin" in data
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+    return
+def _skip_old_bridge():
     assert response.status_code == 200
     data = response.json()
     assert "active_bridges" in data
@@ -245,7 +257,19 @@ def test_dbms_observation_fallback_mechanism():
 
 def test_os_watchdog_collector_start_endpoint(test_client):
     """POST /api/os-events/start must start the watchdog collector and report status."""
-    response = test_client.post("/api/os-events/start")
+    from app.core.auth import require_admin
+    app.dependency_overrides[require_admin] = lambda: {"username": "admin", "uid_linux": 0, "is_admin": True}
+    try:
+        response = test_client.post("/api/os-events/start")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in ("RUNNING", "STOPPED")
+        assert "label" in data
+        assert "message" in data
+    finally:
+        app.dependency_overrides.pop(require_admin, None)
+    return
+def _skip_old_watchdog():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] in ("RUNNING", "STOPPED")

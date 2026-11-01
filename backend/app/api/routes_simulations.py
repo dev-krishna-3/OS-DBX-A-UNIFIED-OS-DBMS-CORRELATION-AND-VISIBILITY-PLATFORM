@@ -7,9 +7,10 @@ Banker's Algorithm Safety Checking, and Resource Allocation Graph (RAG) Deadlock
 
 import sys
 import os
+import logging
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Ensure project root is on sys.path for os_monitor imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -33,6 +34,7 @@ from os_monitor.simulations.deadlock.bankers import bankers_algorithm
 from os_monitor.simulations.deadlock.resource_graph import detect_deadlock
 
 router = APIRouter(prefix="/simulations", tags=["simulations"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -48,29 +50,52 @@ class ProcessInput(BaseModel):
 
 class SchedulingRequest(BaseModel):
     algorithm: str = Field(description="Algorithm: FCFS, SJF, SRTF, RR, PRIORITY")
-    processes: List[ProcessInput]
-    quantum: Optional[int] = Field(default=2, description="Time quantum for Round Robin")
+    processes: List[ProcessInput] = Field(min_length=1, max_length=100)
+    quantum: Optional[int] = Field(default=2, gt=0, description="Time quantum for Round Robin")
 
 
 class MemoryRequest(BaseModel):
     algorithm: str = Field(description="Algorithm: FIFO, LRU, OPTIMAL, ALL")
-    reference_string: List[int]
-    num_frames: int = Field(default=3, gt=0)
+    reference_string: List[int] = Field(min_length=1, max_length=5000)
+    num_frames: int = Field(default=3, gt=0, le=100)
 
 
 class BankersRequest(BaseModel):
-    allocation: List[List[int]]
-    max_need: List[List[int]]
-    available: List[int]
+    allocation: List[List[int]] = Field(min_length=1, max_length=100)
+    max_need: List[List[int]] = Field(min_length=1, max_length=100)
+    available: List[int] = Field(min_length=1, max_length=100)
     request: Optional[List[int]] = None
     requesting_pid: int = 0
 
+    @model_validator(mode="after")
+    def matching_resource_matrix(self):
+        if len(self.allocation) != len(self.max_need):
+            raise ValueError("allocation and max_need must have the same process count")
+        width = len(self.available)
+        if any(len(row) != width for row in self.allocation + self.max_need):
+            raise ValueError("all resource vectors must match available")
+        if self.request is not None and len(self.request) != width:
+            raise ValueError("request must match available")
+        return self
+
 
 class RAGRequest(BaseModel):
-    processes: List[int]
-    resources: List[int]
-    allocation: Dict[int, List[int]]  # pid -> list of resource_ids held
-    request: Dict[int, List[int]]     # pid -> list of resource_ids requested
+    processes: List[int] = Field(min_length=1, max_length=100)
+    resources: List[int] = Field(min_length=1, max_length=100)
+    allocation: Dict[int, List[int]] = Field(max_length=100)  # pid -> resource_ids held
+    request: Dict[int, List[int]] = Field(max_length=100)     # pid -> resource_ids requested
+
+    @model_validator(mode="after")
+    def bounded_resource_edges(self):
+        if any(len(edges) > 100 for edges in [*self.allocation.values(), *self.request.values()]):
+            raise ValueError("Each process may list at most 100 resource edges")
+        valid_processes = set(self.processes)
+        if set(self.allocation) - valid_processes or set(self.request) - valid_processes:
+            raise ValueError("Allocation and request keys must refer to declared processes")
+        valid_resources = set(self.resources)
+        if any(set(edges) - valid_resources for edges in [*self.allocation.values(), *self.request.values()]):
+            raise ValueError("Resource edges must refer to declared resources")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +200,8 @@ def run_scheduling_simulation(req: SchedulingRequest) -> Dict[str, Any]:
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
-        raise HTTPException(status_code=500, detail=f"Scheduling simulation error: {str(e)}")
+        logger.exception("Scheduling simulation failed")
+        raise HTTPException(status_code=400, detail="Invalid scheduling simulation input.") from e
 
 
 @router.post("/memory")
@@ -294,7 +320,8 @@ def run_memory_simulation(req: MemoryRequest) -> Dict[str, Any]:
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
-        raise HTTPException(status_code=500, detail=f"Memory simulation error: {str(e)}")
+        logger.exception("Memory simulation failed")
+        raise HTTPException(status_code=400, detail="Invalid memory simulation input.") from e
 
 
 @router.post("/deadlock/bankers")
@@ -337,7 +364,8 @@ def run_bankers_simulation(req: BankersRequest) -> Dict[str, Any]:
 
         return ret
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Banker's algorithm error: {str(e)}")
+        logger.exception("Banker's algorithm simulation failed")
+        raise HTTPException(status_code=400, detail="Invalid Banker's algorithm input.") from e
 
 
 @router.post("/deadlock/rag")
@@ -380,11 +408,12 @@ def run_rag_simulation(req: RAGRequest) -> Dict[str, Any]:
 
         return ret
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"RAG deadlock detection error: {str(e)}")
+        logger.exception("Resource allocation graph analysis failed")
+        raise HTTPException(status_code=400, detail="Invalid resource allocation graph input.") from e
 
 
 class DiskSchedulingRequest(BaseModel):
-    tracks: List[int]
+    tracks: List[int] = Field(min_length=1, max_length=1000)
     initial_head: int = 50
     algorithm: str = "FCFS"
 
@@ -465,7 +494,7 @@ def run_disk_simulation(req: DiskSchedulingRequest) -> Dict[str, Any]:
 
 class SyncSimulationRequest(BaseModel):
     problem_type: str = "PRODUCER_CONSUMER"
-    iterations: int = 5
+    iterations: int = Field(default=5, ge=1, le=1000)
 
 
 @router.post("/sync")

@@ -6,7 +6,6 @@ base_url = "http://127.0.0.1:8000"
 print("1. Registering user")
 r_reg = requests.post(f"{base_url}/api/auth/register", json={
     "username": "cli_demo_user",
-    "uid_linux": 9999,
     "password": "supersecurepassword"
 })
 print("Register response:", r_reg.status_code, r_reg.text)
@@ -16,7 +15,7 @@ r_login = requests.post(f"{base_url}/api/auth/token", data={
     "username": "cli_demo_user",
     "password": "supersecurepassword"
 })
-print("Login response:", r_login.status_code, r_login.text)
+print("Login response:", r_login.status_code)
 
 token = r_login.json().get("access_token")
 headers = {"Authorization": f"Bearer {token}"}

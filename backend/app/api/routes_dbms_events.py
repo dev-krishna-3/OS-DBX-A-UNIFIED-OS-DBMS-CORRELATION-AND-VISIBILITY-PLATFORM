@@ -19,6 +19,20 @@ _shared_seen_processlist: set = set()
 
 
 def get_dbms_connection():
+    try:
+        connection = get_connection()
+    except Exception:
+        connection = None
+    try:
+        yield connection
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+    return
+def _unused_old_get_dbms_connection():
     connection = get_connection()
     try:
         yield connection
@@ -61,6 +75,14 @@ def collect_dbms_events(
 @router.get("/status")
 def get_dbms_observation_status(connection=Depends(get_dbms_connection)) -> dict:
     """Check MySQL Performance Schema availability and statements instrument status."""
+    if connection is None:
+        return {
+            "status": "UNAVAILABLE",
+            "label": "[DBMS OBSERVATION: UNAVAILABLE]",
+            "performance_schema": False,
+            "history_long_enabled": False,
+            "reason": "MySQL server connection unavailable."
+        }
     try:
         cur = connection.cursor(dictionary=True)
         cur.execute("SELECT @@performance_schema AS ps_enabled")

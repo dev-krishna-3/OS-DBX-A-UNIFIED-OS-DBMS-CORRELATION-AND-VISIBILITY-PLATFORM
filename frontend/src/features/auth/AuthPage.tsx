@@ -26,7 +26,6 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -54,7 +53,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
         setPassword('');
         setConfirmPassword('');
       } else {
-        const result = await authApi.signIn(email, password, rememberMe);
+        const result = await authApi.signIn(email, password);
         const user = await authApi.currentUser();
         setPassword('');
         onAuthenticated(user, result.email_notification_sent);
@@ -181,7 +180,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                   <input
                     id="account-password"
                     required
-                    minLength={6}
+                    minLength={isSignUp ? 12 : 1}
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
@@ -202,7 +201,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                     <input
                       id="account-password-confirm"
                       required
-                      minLength={6}
+                      minLength={12}
                       type={showPassword ? 'text' : 'password'}
                       value={confirmPassword}
                       onChange={(event) => setConfirmPassword(event.target.value)}
@@ -214,29 +213,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
               )}
 
               {!isSignUp && (
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '-4px' }}>
-                  <button
-                    type="button"
-                    className="button button-quiet"
-                    style={{ fontSize: '11.5px', padding: '3px 8px', minHeight: '26px' }}
-                    onClick={() => { setEmail('abc'); setPassword('12345678'); }}
-                  >
-                    Quick preset: abc
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-quiet"
-                    style={{ fontSize: '11.5px', padding: '3px 8px', minHeight: '26px' }}
-                    onClick={() => { setEmail('admin'); setPassword('Admin@OSDBX2026!'); }}
-                  >
-                    Quick preset: admin
-                  </button>
-                </div>
-              )}
-
-              {!isSignUp && (
                 <div className="login-form-options">
-                  <label className="remember-option"><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} /><span>Remember me</span></label>
                   <button type="button" className="forgot-link" onClick={() => setMessage('Password recovery is not set up yet. Please contact your OS-DBX administrator.')}>Forgot password?</button>
                 </div>
               )}

@@ -41,7 +41,8 @@ class OSEvent(BaseModel):
     # Collector-assigned UUID for this event (replaces the old integer id).
     event_id: str = Field(
         default_factory=lambda: str(uuid.uuid4()),
-        min_length=1,
+        min_length=36,
+        max_length=36,
         description="Collector-assigned UUID for this event.",
     )
     source: Literal["OS"] = Field(
@@ -99,6 +100,14 @@ class OSEvent(BaseModel):
             raise ValueError("Filesystem event types are not accepted at the process events endpoint")
         return value
 
+    @field_validator("event_id")
+    @classmethod
+    def event_id_must_be_uuid(cls, value: str) -> str:
+        try:
+            return str(uuid.UUID(value))
+        except (ValueError, AttributeError) as error:
+            raise ValueError("event_id must be a UUID") from error
+
     @field_validator("user")
     @classmethod
     def user_not_blank(cls, value: str) -> str:
@@ -126,7 +135,8 @@ class OSFilesystemEvent(BaseModel):
 
     event_id: str = Field(
         default_factory=lambda: str(uuid.uuid4()),
-        min_length=1,
+        min_length=36,
+        max_length=36,
         description="Collector-assigned UUID.",
     )
     source: Literal["OS"] = Field(default="OS")
@@ -154,6 +164,14 @@ class OSFilesystemEvent(BaseModel):
     )
     evidence_completeness: str | None = Field(default=None)
     capture_latency_sec: float | None = Field(default=None, ge=0)
+
+    @field_validator("event_id")
+    @classmethod
+    def event_id_must_be_uuid(cls, value: str) -> str:
+        try:
+            return str(uuid.UUID(value))
+        except (ValueError, AttributeError) as error:
+            raise ValueError("event_id must be a UUID") from error
 
 
 class StoredOSEvent(OSEvent):

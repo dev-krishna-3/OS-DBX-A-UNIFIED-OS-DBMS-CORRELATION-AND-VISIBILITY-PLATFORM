@@ -12,6 +12,7 @@ from app.models.what_if import (
     WhatIfScenario,
     WhatIfScheduleRequest,
 )
+from app.config.settings import settings
 from app.repositories.what_if_repository import WhatIfRepository
 from app.services.recovery_service import RecoveryService
 from app.services.schedule_service import ScheduleService
@@ -19,7 +20,46 @@ from app.services.schedule_service import ScheduleService
 router = APIRouter(prefix="/what-if", tags=["what-if"])
 
 
-def get_what_if_repository(connection=Depends(get_connection)):
+class InMemoryWhatIfRepository:
+    def __init__(self) -> None:
+        self._scenarios: dict[int, WhatIfScenario] = {}
+        self._next_id = 1
+
+    def create(
+        self,
+        analysis_type: str,
+        name: str,
+        input_data: dict,
+        result: dict,
+    ) -> WhatIfScenario:
+        from datetime import datetime, timezone
+        created_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        scenario = WhatIfScenario(
+            scenario_id=self._next_id,
+            analysis_type=analysis_type,
+            name=name,
+            input_data=input_data,
+            result=result,
+            created_at=created_at,
+        )
+        self._scenarios[self._next_id] = scenario
+        self._next_id += 1
+        return scenario
+
+    def recent(self, limit: int = 50) -> list[WhatIfScenario]:
+        return list(reversed(list(self._scenarios.values())))[:limit]
+
+    def get(self, scenario_id: int) -> WhatIfScenario | None:
+        return self._scenarios.get(scenario_id)
+
+
+_in_memory_what_if_repo = InMemoryWhatIfRepository()
+
+
+def get_what_if_repository():
+    if settings.event_storage.strip().lower() == "memory":
+        yield _in_memory_what_if_repo
+        return
     try:
         yield WhatIfRepository(connection)
     finally:

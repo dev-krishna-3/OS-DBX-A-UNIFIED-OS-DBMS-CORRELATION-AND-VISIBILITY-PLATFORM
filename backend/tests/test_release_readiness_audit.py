@@ -1,5 +1,7 @@
 """Release-Readiness and Security Hardening Verification Tests."""
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -34,8 +36,11 @@ def test_auth_rate_limiting():
 
 def test_authenticated_endpoints_and_aliases():
     """Verify newly mapped routes and aliases work under valid authentication."""
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    if not admin_password:
+        pytest.skip("Set ADMIN_PASSWORD to test the seeded administrator login")
     # Authenticate as admin
-    auth_resp = client.post("/api/auth/token", data={"username": "admin", "password": "Admin@OSDBX2026!"})
+    auth_resp = client.post("/api/auth/token", data={"username": "admin", "password": admin_password})
     assert auth_resp.status_code == 200
     token = auth_resp.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}

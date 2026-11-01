@@ -1,22 +1,28 @@
 """Authentication and authorization core module."""
 
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import jwt
 from app.config.database import get_connection
 from app.models.users import TokenData, UserInDB
 import mysql.connector
 import bcrypt
 
-# Hardcoded for demo/simplicity; in production this must be secure and loaded from env vars
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "b39a4891b6196b0c20a4b82d334e2c608a1e2f75a7c9383920c7d422a578351b")
+_configured_secret = os.environ.get("JWT_SECRET_KEY")
+if os.environ.get("ENVIRONMENT", "development").lower() == "production" and not _configured_secret:
+    raise RuntimeError("JWT_SECRET_KEY must be configured in production")
+if os.environ.get("ENVIRONMENT", "development").lower() in {"production", "prod"} and len(_configured_secret or "") < 32:
+    raise RuntimeError("JWT_SECRET_KEY must be at least 32 characters in production")
+SECRET_KEY = _configured_secret or secrets.token_urlsafe(48)
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 days session validity
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 12  # 12-hour session validity
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+oauth2_optional_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -47,6 +53,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def get_user_by_username(connection: mysql.connector.MySQLConnection, username: str) -> Optional[UserInDB]:
+    if connection is None:
+        return None
     """Look up a user by username or email. Returns None if not found."""
     cursor = connection.cursor(dictionary=True)
     try:
@@ -72,10 +80,7 @@ def get_user_by_username(connection: mysql.connector.MySQLConnection, username: 
         if user_dict.get("password_hash") is None:
             user_dict["password_hash"] = ""
         
-        # Determine is_admin status: admin username, root Linux UID (0), or explicit flag
-        uid = user_dict.get("uid_linux", 1000)
-        uname = user_dict.get("username", "").lower()
-        user_dict["is_admin"] = bool(user_dict.get("is_admin") or uname in ("admin", "root") or uid == 0)
+        user_dict["is_admin"] = bool(user_dict.get("is_admin"))
 
         return UserInDB(**user_dict)
     return None
@@ -105,7 +110,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
             detail="Session has expired. Please sign in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except JWTError:
+    except jwt.InvalidTokenError:
         raise credentials_exception
 
     # Open a dedicated connection just for the auth lookup — do not share
@@ -122,4 +127,18 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
 
 async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)) -> UserInDB:
     """FastAPI dependency: return authenticated user (extend to check active flag if needed)."""
+    return current_user
+
+
+async def get_optional_user(token: Optional[str] = Depends(oauth2_optional_scheme)) -> Optional[UserInDB]:
+    if token is None:
+        return None
+    return await get_current_user(token)
+
+
+async def require_admin(current_user: UserInDB = Depends(get_current_user)) -> UserInDB:
+    """Require the database-backed administrator flag for privileged endpoints."""
+    is_admin = current_user.get("is_admin", False) if isinstance(current_user, dict) else current_user.is_admin
+    if not is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied: Administrator privileges required.")
     return current_user

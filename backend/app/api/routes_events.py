@@ -10,7 +10,7 @@ in-memory service; production/integration environments can select MySQL.
 
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config.database import get_connection
 from app.config.settings import settings
@@ -26,13 +26,18 @@ MAX_LIMIT = 500
 
 
 def get_event_service() -> Iterator[EventService]:
-    """Use durable MySQL storage when available, falling back to in-memory service."""
+    """Use the configured event store; never silently downgrade durable storage."""
+    storage = settings.event_storage.strip().lower()
+    if storage == "memory":
+        yield event_service
+        return
+    if storage != "mysql":
+        raise HTTPException(status_code=500, detail="EVENT_STORAGE must be 'memory' or 'mysql'.")
 
     try:
         connection = get_connection()
-    except Exception:
-        yield event_service
-        return
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="Configured MySQL event storage is unavailable.") from error
 
     try:
         yield EventService(repository=EventRepository(connection))

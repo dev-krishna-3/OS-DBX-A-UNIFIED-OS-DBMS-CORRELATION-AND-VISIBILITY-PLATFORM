@@ -18,7 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend application code
 COPY backend/app ./app
 COPY backend/tests ./tests
-COPY backend/pytest.ini .
 
 # Set environment defaults
 ENV PYTHONUNBUFFERED=1 \

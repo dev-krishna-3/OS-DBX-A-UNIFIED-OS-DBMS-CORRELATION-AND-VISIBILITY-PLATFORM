@@ -17,12 +17,21 @@ import time
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from app.core.auth import require_admin
+from app.api.routes_auth import check_rate_limit, record_rate_limited_attempt
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/console", tags=["console"])
+router = APIRouter(prefix="/console", tags=["console"], dependencies=[Depends(require_admin)])
+
+
+def limit_sql_console(request: Request) -> None:
+    key = (f"console-sql:{request.client.host if request.client else 'unknown'}",)
+    check_rate_limit(key, max_attempts=30, window_seconds=60)
+    record_rate_limited_attempt(key, window_seconds=60)
 
 _READ_ONLY = re.compile(r"^\s*(select|show|describe|desc|explain)\b", re.IGNORECASE)
+_UNSAFE_READ_CLAUSES = re.compile(r"\binto\s+(out|dump)file\b|\bfor\s+update\b|\block\s+in\s+share\s+mode\b", re.IGNORECASE)
 _BROWSERS = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "chrome", "firefox", "msedge", "brave"}
 
 
@@ -75,7 +84,7 @@ def _local_port_for(pid: int, mysql_port: int) -> int | None:
     return None
 
 
-@router.post("/sql")
+@router.post("/sql", dependencies=[Depends(limit_sql_console)])
 def run_sql_causality(request: SqlConsoleRequest) -> dict:
     """Execute one read-only statement, then trace it across the OS and DBMS layers."""
     query = request.query.strip().rstrip(";").strip()
@@ -86,6 +95,8 @@ def run_sql_causality(request: SqlConsoleRequest) -> dict:
             status_code=400,
             detail="Only read-only statements are allowed here (SELECT, SHOW, DESCRIBE, EXPLAIN).",
         )
+    if _UNSAFE_READ_CLAUSES.search(query):
+        raise HTTPException(status_code=400, detail="File-writing and locking clauses are not allowed.")
 
     import mysql.connector
 
@@ -122,7 +133,7 @@ def run_sql_causality(request: SqlConsoleRequest) -> dict:
             cursor.execute(query)
             if cursor.description:
                 columns = [d[0] for d in cursor.description]
-                fetched = cursor.fetchall()
+                fetched = cursor.fetchmany(request.max_rows + 1)
                 total_rows = len(fetched)
                 rows = [[_jsonable(v) for v in row] for row in fetched[: request.max_rows]]
             cursor.close()

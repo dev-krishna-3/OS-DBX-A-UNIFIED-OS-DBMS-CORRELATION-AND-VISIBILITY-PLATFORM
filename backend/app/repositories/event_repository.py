@@ -31,15 +31,13 @@ class EventRepository:
             })
             cursor.execute(
                 """
-                INSERT IGNORE INTO processes (pid, ppid, name, user, file_path, state)
-                VALUES (%s, %s, %s, %s, %s, 'RUNNING')
+                INSERT IGNORE INTO processes (pid, ppid, name, state)
+                VALUES (%s, %s, %s, 'RUNNING')
                 """,
                 (
                     event.pid,
                     event.ppid,
                     event.process_name or "unknown",
-                    event.user,
-                    event.file_path,
                 ),
             )
             cursor.execute(

@@ -10,8 +10,10 @@ class AuditLogBase(BaseModel):
     action: str = Field(description="Action performed by the user")
     details: Optional[str] = Field(default=None, description="Additional JSON or text details")
 
-class AuditLogCreate(AuditLogBase):
-    pass
+class AuditLogCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(min_length=1, max_length=255)
+    details: Optional[str] = Field(default=None, max_length=10000)
 
 class AuditLogInDB(AuditLogBase):
     id: int

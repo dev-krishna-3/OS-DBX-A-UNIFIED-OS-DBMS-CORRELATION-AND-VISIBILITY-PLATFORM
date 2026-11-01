@@ -165,7 +165,7 @@ def login_menu():
         console.print("    [dim]LINK: Users table → OAuth2 security context.[/dim]\n")
 
         console.print("    [dim yellow]ADMIN TEST ACCOUNT (Development/Testing):[/dim yellow]")
-        console.print("    [dim]Username: [bold yellow]admin[/bold yellow] | Password: [bold yellow]Admin@OSDBX2026![/bold yellow] (or env: ADMIN_PASSWORD) | Role: [bold green]admin (UID: 0)[/bold green][/dim]\n")
+        console.print("    [dim]Username: [bold yellow]admin[/bold yellow] | Password: configured with ADMIN_PASSWORD | Role: [bold green]admin[/bold green][/dim]\n")
 
         console.print("[2] Register New User")
         console.print("    [dim]WHAT: Create a new database account with Linux UID mapping.[/dim]")
@@ -2505,7 +2505,7 @@ def admin_audit_logs():
                 "Your current account does not have administrator privileges to view global audit logs.\n\n"
                 "ADMIN TEST ACCOUNT DETAILS:\n"
                 "  - Username: [bold yellow]admin[/bold yellow]\n"
-                "  - Password: [bold yellow]Admin@OSDBX2026![/bold yellow] (or configured via ADMIN_PASSWORD)\n"
+                "  - Password: configured via ADMIN_PASSWORD\n"
                 "  - Role: [bold green]admin (Linux UID: 0)[/bold green]\n\n"
                 "Please logout and sign in with the admin account to access security audit trails.",
                 title="[bold red]Authorization Error (403 Forbidden)[/bold red]",

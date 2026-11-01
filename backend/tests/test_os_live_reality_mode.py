@@ -67,7 +67,7 @@ client = TestClient(app)
 def test_null_pid_filesystem_event_accepted():
     """POST /api/os-events/filesystem must accept pid=null and return 201."""
     payload = {
-        "event_id": "fs-event-uuid-001",
+        "event_id": "11111111-1111-1111-1111-111111111111",
         "source": "OS",
         "timestamp": _utc().isoformat(),
         "event_type": "file_modified",
@@ -79,7 +79,7 @@ def test_null_pid_filesystem_event_accepted():
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["pid"] is None
-    assert body["event_id"] == "fs-event-uuid-001"
+    assert body["event_id"] == "11111111-1111-1111-1111-111111111111"
     assert body["host_id"] == "test-host"
     assert "id" in body
     assert "received_at" in body

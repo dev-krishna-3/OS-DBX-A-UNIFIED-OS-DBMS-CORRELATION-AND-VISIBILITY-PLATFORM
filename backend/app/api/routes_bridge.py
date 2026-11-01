@@ -1,12 +1,13 @@
 """Identity Bridge API."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.core.auth import require_admin
 from app.services.identity_bridge import IdentityBridgeService
 from app.config.settings import settings
 
 router = APIRouter(prefix="/bridge", tags=["bridge"])
 
-@router.get("/live-map")
+@router.get("/live-map", dependencies=[Depends(require_admin)])
 def get_live_identity_map():
     """Returns the real-time mapping of OS PIDs to MySQL Connection IDs."""
     bridge = IdentityBridgeService(

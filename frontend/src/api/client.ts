@@ -1,13 +1,14 @@
 type RequestOptions = Omit<RequestInit, 'headers'> & { headers?: HeadersInit };
 
 const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-const apiBaseUrl = (rawBaseUrl || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+const apiBaseUrl = (rawBaseUrl || '').replace(/\/+$/, '');
 const accessTokenKey = 'osdbx_access_token';
 
 function readStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    return window.localStorage.getItem(accessTokenKey) ?? window.sessionStorage.getItem(accessTokenKey);
+    window.localStorage.removeItem(accessTokenKey);
+    return window.sessionStorage.getItem(accessTokenKey);
   } catch {
     return null;
   }
@@ -23,15 +24,15 @@ export function getAccessToken(): string | null {
   return accessToken ?? readStoredToken();
 }
 
-export function setAccessToken(token: string | null, _remember = true): void {
+export function setAccessToken(token: string | null): void {
   accessToken = token;
   if (typeof window === 'undefined') return;
   try {
-    window.sessionStorage.removeItem(accessTokenKey);
     window.localStorage.removeItem(accessTokenKey);
     if (token) {
-      window.localStorage.setItem(accessTokenKey, token);
       window.sessionStorage.setItem(accessTokenKey, token);
+    } else {
+      window.sessionStorage.removeItem(accessTokenKey);
     }
   } catch {
     // Keep the in-memory token usable when browser storage is unavailable.
@@ -39,10 +40,6 @@ export function setAccessToken(token: string | null, _remember = true): void {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  if (!apiBaseUrl) {
-    throw new Error('API is not configured. Set VITE_API_BASE_URL in the frontend environment.');
-  }
-
   const headers = new Headers(options.headers);
   const token = accessToken ?? readStoredToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);

@@ -10,23 +10,30 @@ This script manually creates a full chain:
 import requests
 import datetime
 import uuid
+import os
 
 API_URL = "http://127.0.0.1:8000"
 
 def run_verification():
+    token = os.environ.get("OSDBX_API_TOKEN")
+    db_password = os.environ.get("MYSQL_PASSWORD")
+    if not token or not db_password:
+        raise RuntimeError("Set OSDBX_API_TOKEN and MYSQL_PASSWORD before running verification.")
+    session = requests.Session()
+    session.headers["Authorization"] = f"Bearer {token}"
     print("Starting End-to-End Verification Pipeline...\n")
     
     # 1. Start a transaction manually to get an ID
     print("[1] Beginning Transaction...")
-    r = requests.post(f"{API_URL}/api/transactions/begin", json={"pid": 9999, "isolation_level": "READ_COMMITTED"})
+    r = session.post(f"{API_URL}/api/transactions/begin", json={"pid": 9999, "isolation_level": "READ_COMMITTED"})
     r.raise_for_status()
     tx_id = r.json()["transaction_id"]
     print(f"    Transaction ID: {tx_id}")
 
     # 2. Acquire locks (which creates queries)
     print("[2] Acquiring locks to simulate work...")
-    requests.post(f"{API_URL}/api/locks", json={"transaction_id": tx_id, "data_item": "Resource_A", "lock_type": "X"}).raise_for_status()
-    requests.post(f"{API_URL}/api/transactions/{tx_id}/write", json={"data_item": "Resource_A"}).raise_for_status()
+    session.post(f"{API_URL}/api/locks", json={"transaction_id": tx_id, "data_item": "Resource_A", "lock_type": "X"}).raise_for_status()
+    session.post(f"{API_URL}/api/transactions/{tx_id}/write", json={"data_item": "Resource_A"}).raise_for_status()
 
     # 3. Inject a Cross-Layer Trace
     print("[3] Injecting cross-layer correlation trace...")
@@ -51,7 +58,7 @@ def run_verification():
             "source": "dbms_performance_schema"
         }
     ]
-    r = requests.post(f"{API_URL}/api/correlations", json={"events": events})
+    r = session.post(f"{API_URL}/api/correlations", json={"events": events})
     r.raise_for_status()
     trace_id = r.json()["trace"]["trace_id"]
     print(f"    Trace ID created: {trace_id}")
@@ -71,7 +78,12 @@ def run_verification():
     # I'll just write directly to the DB or see if the replay endpoint works.
     print("Connecting directly to DB to insert incident for verification...")
     import mysql.connector
-    conn = mysql.connector.connect(host="localhost", user="root", password="krishna356", database="os_dbx")
+    conn = mysql.connector.connect(
+        host=os.environ.get("MYSQL_HOST", "localhost"),
+        user=os.environ.get("MYSQL_USER", "osdbx_app"),
+        password=db_password,
+        database=os.environ.get("MYSQL_DATABASE", "os_dbx"),
+    )
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO incidents (incident_type, trace_id, description, severity) 
@@ -84,7 +96,7 @@ def run_verification():
 
     # 5. Call Incident Replay API
     print("[5] Replaying the incident...")
-    r = requests.post(f"{API_URL}/api/incidents/{incident_id}/replay", json={})
+    r = session.post(f"{API_URL}/api/incidents/{incident_id}/replay", json={})
     if r.status_code == 200:
         replay = r.json()
         print(f"\nSUCCESS! Replay ID: {replay['replay_id']}")

@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.security import OAuth2PasswordRequestForm
 import mysql.connector
 
@@ -13,51 +13,84 @@ from app.core.auth import (
     get_password_hash,
     get_user_by_username,
     verify_password,
-    get_current_active_user
+    get_current_active_user,
+    get_optional_user,
 )
 from app.models.users import Token, UserCreate, UserOut, UserInDB
+from app.config.settings import settings
 from app.services.email_service import send_signin_notification, send_signup_notification
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 import time
+import threading
 
 _login_failed_attempts: dict[str, list[float]] = {}
+_rate_limit_lock = threading.Lock()
 
-def check_login_rate_limit(key: str, max_attempts: int = 15, window_seconds: int = 60) -> None:
-    now = time.time()
-    attempts = _login_failed_attempts.get(key, [])
-    recent = [t for t in attempts if now - t < window_seconds]
-    _login_failed_attempts[key] = recent
-    if len(recent) >= max_attempts:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed login attempts. Please wait 60 seconds before trying again.",
-        )
+def check_rate_limit(keys: tuple[str, ...], max_attempts: int, window_seconds: int, detail: str = "Too many requests. Try again later.") -> None:
+    now = time.monotonic()
+    with _rate_limit_lock:
+        for key in keys:
+            recent = [t for t in _login_failed_attempts.get(key, []) if now - t < window_seconds]
+            _login_failed_attempts[key] = recent
+            if len(recent) >= max_attempts:
+                raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
 
-def record_failed_attempt(key: str) -> None:
-    now = time.time()
-    _login_failed_attempts.setdefault(key, []).append(now)
+def record_rate_limited_attempt(keys: tuple[str, ...], window_seconds: int) -> None:
+    now = time.monotonic()
+    with _rate_limit_lock:
+        for key in keys:
+            recent = [t for t in _login_failed_attempts.get(key, []) if now - t < window_seconds]
+            recent.append(now)
+            _login_failed_attempts[key] = recent
+        if len(_login_failed_attempts) > 10000:
+            for key, attempts in list(_login_failed_attempts.items()):
+                if not attempts or now - attempts[-1] >= window_seconds:
+                    _login_failed_attempts.pop(key, None)
+            while len(_login_failed_attempts) > 10000:
+                _login_failed_attempts.pop(next(iter(_login_failed_attempts)))
 
-def clear_failed_attempts(key: str) -> None:
-    _login_failed_attempts.pop(key, None)
+def clear_rate_limit(keys: tuple[str, ...]) -> None:
+    with _rate_limit_lock:
+        for key in keys:
+            _login_failed_attempts.pop(key, None)
 
 
 def get_dbms_connection():
-    connection = get_connection()
+    if settings.event_storage.strip().lower() == "memory":
+        yield None
+        return
+    try:
+        connection = get_connection()
+    except Exception:
+        connection = None
     try:
         yield connection
     finally:
-        connection.close()
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register_user(
     user_in: UserCreate,
     background_tasks: BackgroundTasks,
+    request: Request,
+    current_user: UserInDB | None = Depends(get_optional_user),
     connection: mysql.connector.MySQLConnection = Depends(get_dbms_connection)
 ) -> Any:
     """Register a new user in the system."""
+    if not settings.allow_public_registration and not (current_user and current_user.is_admin):
+        raise HTTPException(status_code=403, detail="Account creation is restricted to administrators.")
+    if user_in.username.strip().lower() in {"admin", "root"}:
+        raise HTTPException(status_code=400, detail="This username is reserved.")
+    registration_key = (f"register:{request.client.host if request.client else 'unknown'}",)
+    check_rate_limit(registration_key, max_attempts=10, window_seconds=3600)
+    record_rate_limited_attempt(registration_key, window_seconds=3600)
     existing_user = get_user_by_username(connection, user_in.username)
     if existing_user:
         raise HTTPException(
@@ -76,11 +109,9 @@ def register_user(
     
     try:
         cursor = connection.cursor()
-        uid_linux = user_in.uid_linux
-        if uid_linux is None:
-            cursor.execute("SELECT COALESCE(MAX(uid_linux), 1000) + 1 FROM users WHERE uid_linux >= 1000")
-            row = cursor.fetchone()
-            uid_linux = int(row[0]) if row and row[0] is not None else 1001
+        cursor.execute("SELECT COALESCE(MAX(uid_linux), 1000) + 1 FROM users WHERE uid_linux >= 1000")
+        row = cursor.fetchone()
+        uid_linux = int(row[0]) if row and row[0] is not None else 1001
 
         try:
             cursor.execute(
@@ -101,6 +132,19 @@ def register_user(
                 )
             else:
                 raise
+        user_id = int(cursor.lastrowid)
+        cursor.execute(
+            "INSERT INTO workspaces (name, created_by) VALUES (%s, %s)",
+            (f"{user_in.username}'s workspace", user_id),
+        )
+        workspace_id = int(cursor.lastrowid)
+        cursor.execute(
+            """
+            INSERT INTO workspace_memberships (workspace_id, user_id, role, invited_by)
+            VALUES (%s, %s, 'owner', %s)
+            """,
+            (workspace_id, user_id, current_user.user_id if current_user else None),
+        )
         connection.commit()
         cursor.close()
         
@@ -122,14 +166,19 @@ def register_user(
 @router.post("/token", response_model=Token)
 def login_access_token(
     background_tasks: BackgroundTasks,
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     connection: mysql.connector.MySQLConnection = Depends(get_dbms_connection)
 ) -> Any:
     """OAuth2 compatible token login, get an access token for future requests."""
-    check_login_rate_limit(form_data.username)
+    keys = (
+        f"login-user:{form_data.username.casefold()}",
+        f"login-ip:{request.client.host if request.client else 'unknown'}",
+    )
+    check_rate_limit(keys, max_attempts=15, window_seconds=60, detail="Too many failed login attempts. Try again later.")
     user = get_user_by_username(connection, username=form_data.username)
     if not user or not verify_password(form_data.password, user.password_hash):
-        record_failed_attempt(form_data.username)
+        record_rate_limited_attempt(keys, window_seconds=60)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username/email or password",
@@ -140,7 +189,7 @@ def login_access_token(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    clear_failed_attempts(form_data.username)
+    clear_rate_limit(keys)
     recipient_email = user.email or (form_data.username if "@" in form_data.username else None)
     if recipient_email:
         background_tasks.add_task(send_signin_notification, recipient_email, user.username)

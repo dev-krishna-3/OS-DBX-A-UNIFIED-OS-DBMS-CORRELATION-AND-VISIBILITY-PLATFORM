@@ -36,3 +36,20 @@ os_monitor/events.jsonl
 os_monitor/resource_metrics.jsonl
 os_monitor/filesystem_events.jsonl
 os_monitor/watched_folder/
+
+# Secrets, local credentials, and generated database dumps
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+*.sql.gz
+*.dump
+*.bak
+
+# Tooling and IDE caches
+.hallmark/
+.impeccable/
+.impeccable-cache/

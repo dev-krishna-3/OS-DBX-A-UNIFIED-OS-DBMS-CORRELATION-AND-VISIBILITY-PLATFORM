@@ -1,209 +1,137 @@
-# OS-DBX: Unified OS-DBMS Correlation & Visibility Platform
+# OS-DBX
 
-[![Tests](https://img.shields.io/badge/tests-117%20passed-brightgreen.svg)](#test-suite--quality-gate)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.141.1-009688.svg)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-18.3.1-61DAFB.svg)](https://react.dev/)
-[![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1.svg)](https://www.mysql.com/)
-[![Security](https://img.shields.io/badge/security-20--point%20hardened-success.svg)](#20-point-security-hardening-audit)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+OS-DBX is a forensic observability and correlation platform for investigating operating-system and database activity. It collects process, filesystem, resource, and database events, then correlates them when the available identifiers and timing support a relationship.
 
-**OS-DBX** is an enterprise-grade forensic observability and cross-layer correlation platform. It establishes verifiable, evidence-based causal links between physical operating-system processes (Windows kernel threads, file I/O, loopback TCP sockets) and relational database management system internals (MySQL Performance Schema transactions, query executions, lock graphs, and wait-for cycles).
+## What OS-DBX can establish
 
----
+The correlation result depends on what evidence is available:
 
-## Architecture Overview
+- **Direct correlation** uses matching identifiers such as a process ID and an inspected database socket/connection.
+- **Temporal correlation** reports activity that occurred within a configured time window. Timing by itself does not prove that one event caused another.
+- **Not correlated** means the system has no supported link for the events in question.
 
-```
-+-----------------------------------------------------------------------------------+
-|                              REACT FRONTEND (Vite + TypeScript)                  |
-|  - Live Observatory    - Cross-Layer Correlation Explorer    - Deadlock Incident Lab |
-|  - OS Simulation Lab   - DBMS Simulation Lab                - What-If Engine        |
-|  - Glassmorphic UI     - Light / Dark / Blue Tones          - Multi-Theme Engine    |
-+-----------------------------------------------------------------------------------+
-                                          |
-                                          | REST API / Bearer JWT (30-day session)
-                                          v
-+-----------------------------------------------------------------------------------+
-|                               FASTAPI CORE BACKEND                                |
-|  - Security Middleware: XSS, CORS, Clickjacking, MIME-Sniffing, Strict-Referrer   |
-|  - Brute-Force Rate Limiter (Token / Register IP & User throttling)              |
-|  - Role-Based Access Control (Admin vs. Member, Linux UID correlation)           |
-+-----------------------------------------------------------------------------------+
-             |                                              |
-             v                                              v
-+--------------------------+              +-----------------------------------------+
-|   OS TELEMETRY ADAPTER   |              |             IDENTITY BRIDGE             |
-| - Windows Kernel Adapter |              | - TCP Loopback Socket Inspection        |
-| - psutil Process Monitor |              | - Information Schema / Processlist Map  |
-| - Filesystem Watcher     |              | - PID <--> MySQL Connection ID Linker   |
-+--------------------------+              +-----------------------------------------+
-             \                                              /
-              \                                            /
-               v                                          v
-+-----------------------------------------------------------------------------------+
-|                        CROSS-LAYER CORRELATION ENGINE                             |
-|  - DIRECT: Identity Bridge socket matching (Confidence: 1.0)                      |
-|  - TEMPORAL: Execution window and thread heuristics (Confidence: 0.60 - 0.85)     |
-|  - NOT_CORRELATED: Deterministic boundary enforcement (No timestamp guessing)     |
-+-----------------------------------------------------------------------------------+
-                                          |
-                                          v
-+-----------------------------------------------------------------------------------+
-|                           MYSQL 8.0 RELATIONAL STORE                              |
-|  - os_events         - dbms_observations     - cross_layer_traces                 |
-|  - processes         - transactions          - event_correlations                 |
-|  - deadlock_incidents- query_executions      - audit_logs                         |
-+-----------------------------------------------------------------------------------+
+Treat these as investigative observations. The current application does not provide a tamper-evident chain of custody, signed evidence packages, immutable/WORM storage, or a legal determination that an event is admissible evidence. Preserve original host and database logs separately when an investigation requires those properties.
+
+## Collection modes and deployment limits
+
+Choose the deployment based on the machine OS-DBX must observe:
+
+| Mode | What it observes | Important limit |
+|---|---|---|
+| Native Windows backend | The Windows host running the backend, including the collector's process and filesystem events and the host's available socket/process information | The backend still requires MySQL for account initialization and application features. The collector needs suitable OS permissions. Validate socket visibility and database placement in the actual environment. |
+| Docker Compose | The application containers and events explicitly sent to its authenticated ingest API | A container does not automatically see the Windows host's processes, files, or sockets. The Compose stack does not start the separate host agent. |
+| Remote host agent | Events the configured agent can collect on its host and send to the backend | The host agent and backend need network connectivity and the same dedicated ingest token. An agent's event feed does not by itself provide host socket-to-database correlation. |
+
+For host-level Windows collection with a Docker-hosted backend, run the agent on the Windows host and configure it to send to the backend. Keep the agent token private. Confirm that required process, filesystem, and socket sources are actually available before relying on an investigation result.
+
+## Architecture
+
+```text
+Windows host collector or remote agent ── authenticated event ingest ──┐
+                                                                       v
+Browser ── frontend / same-origin API proxy ── FastAPI backend ── MySQL
+                                                ├─ authentication and roles
+                                                ├─ event and audit APIs
+                                                ├─ correlation services
+                                                └─ simulation and analysis labs
 ```
 
----
+The frontend is React, TypeScript, and Vite. The API uses FastAPI and bearer tokens. The backend requires MySQL for account initialization and application data. `EVENT_STORAGE` controls OS-event persistence: `mysql` stores those records in MySQL; `memory` keeps only a bounded recent set that does not survive a backend restart.
 
-## Core Architectural Guarantees
+## Security and data handling
 
-### 1. Evidence-Based Correlation Semantics
-OS-DBX never assumes causality from timestamps alone:
-- **`DIRECT`**: Proven by Identity Bridge socket inspection matching physical Windows client socket `(127.0.0.1:port)` to MySQL server connection ID (`information_schema.processlist`).
-- **`TEMPORAL`**: Observed process activity coinciding with query execution within configured threshold window ($\Delta t \le 5\text{s}$) where socket evidence is partially obscured.
-- **`NOT_CORRELATED`**: Independent background OS or database events with no shared PID, socket, or file descriptor context.
+- Production startup requires a non-root MySQL account, database password, administrator password, JWT signing key, MySQL event storage, and a dedicated OS agent token.
+- Public account registration is off by default. Admin-only areas include the audit log, SQL console, bridge live map, and benchmark execution.
+- Browser access tokens are kept in session storage and expire after 12 hours. This limits persistence after the browser session ends; it does not protect an already compromised browser session.
+- Login/signup throttling is in-process, so it is not shared between multiple backend workers or replicas.
+- Operational records are shared within the OS-DBX workspace. The database does not enforce per-user or per-tenant isolation.
+- The Compose MySQL data volume persists across container restarts. Protect backups and the host volume as sensitive investigative data. Define and enforce a retention policy appropriate to your environment; the application does not provide a complete evidence-retention or immutable-archive system.
+- The endpoint agent's retry queue is in memory. Events still queued when the agent process exits are not a durable local evidence store.
+- A database password was removed from tracked diagnostic scripts, but old Git history is not rewritten. Rotate it if it was ever valid.
 
-### 2. Local Windows Host vs. Cloud/Docker Boundary
-- **Windows Live Reality Mode**: Real-time OS process monitoring (`psutil`, filesystem events, and TCP sockets) executes natively on the Windows host machine to inspect local kernel loopback tables directly.
-- **Containerized / Cloud Mode**: When deployed inside Linux Docker containers, the platform ingests events via the authenticated `/api/os-events` endpoint and provides deterministic simulations and synthetic replay with 100% feature parity.
+For step-by-step instructions on running either the in-memory prototype or the production Docker Compose stack, see [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md).
 
----
+## Local development
 
-## 20-Point Security Hardening Audit
+### Requirements
 
-The platform has completed a comprehensive 20-point security audit:
+- Python 3.12 or later
+- Node.js 20 or later and npm
+- MySQL 8.0, if using MySQL-backed features
 
-| # | Security Control | Implementation Details | Status |
-|---|---|---|---|
-| 1 | **Secrets Management** | Passwords and JWT secret keys loaded via environment variables; no credentials committed | Verified |
-| 2 | **`.env` Protection** | `.gitignore` strictly protects `.env` and `*.local`; only sanitized `.env.example` tracked | Verified |
-| 3 | **Admin Route Protection** | `/api/audit/` requires `is_admin=True` (UID 0 or admin role); returns 403 Forbidden otherwise | Verified |
-| 4 | **Authentication** | OAuth2 Bearer token with HMAC-SHA256 (HS256) signature verification | Verified |
-| 5 | **Authorization / RBAC** | Admin vs Member permission boundaries enforced on all protected endpoints | Verified |
-| 6 | **Input Sanitization** | Pydantic v2 validation models with strict types, constraints, and length limits | Verified |
-| 7 | **XSS Defense** | React automatic contextual escaping; no `dangerouslySetInnerHTML` usage | Verified |
-| 8 | **Rate Limiting** | In-memory token rate limiter restricts repeated invalid logins (15 attempts/minute) | Verified |
-| 9 | **REST API Integrity** | Strict HTTP verb semantics, descriptive status codes (200, 201, 400, 401, 403, 404, 429) | Verified |
-| 10 | **CORS Configuration** | Whitelisted local origins (`5173`, `4173`, `3000`) and regex for secure local iteration | Verified |
-| 11 | **Security Headers** | Injected on all responses: `nosniff`, `DENY` frames, `1; mode=block`, `strict-origin` | Verified |
-| 12 | **Production Debug Mode** | Swagger UI (`/docs`) and OpenAPI spec automatically disabled in production | Verified |
-| 13 | **Dependency Security** | Passlib legacy dependencies replaced with direct `bcrypt` implementation for Python 3.12 | Verified |
-| 14 | **Lean Footprint** | Unused testing packages pruned from production runtimes | Verified |
-| 15 | **Exposed File Defense** | Static assets served via isolated web root; zero file enumeration vulnerabilities | Verified |
-| 16 | **Database Security** | 100% parameterized queries via MySQL Connector; 0 raw SQL string interpolations | Verified |
-| 17 | **Password Hashing** | Cryptographically salted Bcrypt password hashing (`bcrypt.gensalt()`) | Verified |
-| 18 | **Git Leak Check** | Clean history with 0 exposed private keys (`.pem`, `.key`, `.p12`) | Verified |
-| 19 | **Automated Security Tests** | Automated pytest suite `test_release_readiness_audit.py` validates all security gates | Verified |
-| 20 | **Session Expiry Resilience** | 30-day extended JWT validity; auto-synchronization across localStorage/sessionStorage | Verified |
+### Database
 
----
+Initialize a development database with the project schema. In Windows Command Prompt (not PowerShell):
 
-## Interactive Simulation & Forensic Labs
-
-OS-DBX provides high-fidelity, visual simulation workbenches with CLI parity:
-1. **CPU Scheduling Lab**: FCFS, Shortest Job First (SJF), Shortest Remaining Time First (SRTF), Priority Scheduling, and Round Robin (configurable quantum) with dynamic Gantt charts and turnaround metrics.
-2. **Memory Page Replacement Lab**: FIFO, Least Recently Used (LRU), and Optimal Page Replacement with live page-frame visualizer and page fault tracking.
-3. **Deadlock & Forensic Replay Lab**: Banker's Algorithm safety state check, Resource Allocation Graph (RAG) cycle detection, Two-Phase Locking (2PL), and Write-Ahead Logging (WAL) recovery.
-4. **Deterministic Blast Radius Analyzer**: Analyzes transitive transaction impact during deadlock incidents.
-5. **What-If Scenario Engine**: Evaluates database performance under simulated CPU throttling and disk latency.
-
----
-
-## Local Development Quickstart
-
-### Prerequisites
-- Python 3.12+
-- Node.js 20+ & npm 10+
-- MySQL Server 8.0 running locally on port 3306
-
-### 1. Database Initialization
-```bash
-# Connect to MySQL and run schema
+```cmd
 mysql -u root -p < database/schema.sql
 ```
 
-### 2. Backend Setup
-```bash
+Create a least-privilege application user for the backend and grant it access to the development database. Do not run the application as MySQL root. Set `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE` in `backend/.env` as needed. The user needs the database permissions required by the application; grant any additional Performance Schema visibility separately and only if the chosen collection features require it.
+
+### Backend
+
+From the repository root:
+
+```powershell
 cd backend
 python -m venv venv
-venv\Scripts\activate   # Windows
-# or: source venv/bin/activate  # Linux/macOS
-
+venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+$env:ADMIN_PASSWORD = "use-a-private-development-password"
+$env:JWT_SECRET_KEY = "use-a-long-random-development-key"
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
-*Backend runs on `http://127.0.0.1:8000` (Docs: `http://127.0.0.1:8000/docs`).*
 
-### 3. Frontend Setup
-```bash
+The API runs at `http://127.0.0.1:8000`. Interactive API docs are available at `/docs` in development. For a database-backed local run, set `EVENT_STORAGE=mysql` and configure MySQL before starting the backend; otherwise OS events use memory storage.
+
+The backend creates the `admin` account from `ADMIN_PASSWORD`; whenever that variable is set, startup resets the account password to that value. Keep it private and stable across restarts unless you intend to rotate the admin password. New account passwords must be at least 12 characters. Public registration is disabled unless `ALLOW_PUBLIC_REGISTRATION=true` is explicitly configured.
+
+### Frontend
+
+In another terminal:
+
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
-*Frontend runs on `http://localhost:5173`.*
 
-### Default Accounts Seeded Automatically
-- **Admin**: `username`: `admin` | `password`: `Admin@OSDBX2026!` (Full Read/Write, Audit Engine access)
-- **Member**: `username`: `abc` | `password`: `12345678` (Observatory, Labs, What-If)
+The frontend runs at `http://localhost:5173`. Set `VITE_API_BASE_URL` only when the API is served at a different origin and the backend CORS allowlist is configured for that origin. The default is same-origin API access, which is proxied by the Docker Nginx configuration.
 
----
+## Docker Compose
 
-## Docker Containerized Deployment
+The Compose configuration builds the frontend and backend, initializes MySQL from `database/schema.sql` on a new data volume, and stores database data in the `mysql_data` volume. The frontend Nginx server proxies `/api/` to the backend. MySQL is not published on the host; the backend API and frontend are published on ports 8000 and 5173.
 
-Run the complete multi-service stack with a single command:
+1. Copy `.env.example` to `.env`.
+2. Set unique, strong values for `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `ADMIN_PASSWORD`, and `JWT_SECRET_KEY`. Keep `.env` private and out of source control.
+3. Leave `CORS_ORIGINS=[]` when using the same-origin frontend proxy. Set a JSON array of trusted origins only if browser clients will access the API from other origins.
+4. Start the stack:
 
-```bash
+```powershell
 docker compose up -d --build
 ```
 
-- **Frontend**: `http://localhost:5173`
-- **Backend API**: `http://localhost:8000`
-- **MySQL Database**: `localhost:3306`
+Open the frontend at `http://localhost:5173`; the API is also published at `http://localhost:8000`. These HTTP endpoints are intended for local access. For public hosting, put the services behind a properly configured HTTPS reverse proxy or platform ingress, restrict direct API access as appropriate, and configure trusted origins and secret storage for that hosting environment.
 
----
+On an existing MySQL data volume, the MySQL container's initialization variables and schema scripts do not recreate or update database users/schema. Before upgrading, back up the data and verify the `osdbx_app` user exists with the required database permissions. Do not remove the volume as a troubleshooting step unless you intend to destroy its data.
 
-## Test Suite & Quality Gate
+The Compose stack does not run the Windows host collector. Device enrollment now issues a dedicated, expiring bearer credential; configure the collector with the enrolled device's credential and reachable HTTPS API URL. Do not use a human administrator token for ingestion. The current collector does not yet implement protected credential storage or the agreed durable encrypted queue, so it is not ready for pilot use.
 
-Run the complete backend test suite (117 test cases):
+## Before a real investigation or public deployment
 
-```bash
-cd backend
-venv\Scripts\python.exe -m pytest -q
-# Output: 117 passed in 2.98s
-```
+- The deployment plan at [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) defines 16 mandatory outage, security, recovery, and evidence-integrity scenarios. They are not yet verified. Do not consider the project production-ready until each scenario has an implemented detection/response, a recovery procedure, and a recorded passing test.
+- Select the deployment topology based on which host and database must be observed; remote/cloud hosting alone cannot inspect another machine's local kernel state.
+- Verify collector permissions, event sources, timestamps, host identity, socket visibility, and database connectivity on the actual target machines.
+- Configure HTTPS, firewall/network access, secret management, backups, retention, and monitoring for the chosen host.
+- Restrict access to collected process, path, query, and audit data; it can contain sensitive information.
+- Establish separate preservation controls if the investigation requires tamper evidence, chain of custody, or immutable retention. Current project behavior does not provide legally defensible chain of custody.
+- Run the project's backend tests and frontend production build in the target environment before relying on a release. Their results are not asserted here.
 
-Compile and verify frontend production build:
+## Troubleshooting
 
-```bash
-cd frontend
-npm run build
-# Output: ✓ built in 3.67s (0 TypeScript errors)
-```
-
----
-
-## 3-Day Deployment & Viva Rehearsal Plan (Friday–Sunday for Monday Demo)
-
-| Timeline | Phase | Key Milestones & Actions | Verification Checkpoints |
-|---|---|---|---|
-| **Friday (Day 1)** | *Freeze & Smoke Verification* | - Run full regression suite (`pytest` & `npm run build`)<br>- Verify MySQL schema and seed data<br>- Start live collectors and confirm real event stream | `117/117` pytest pass<br>No 401 token errors<br>Event stream shows real Windows PIDs |
-| **Saturday (Day 2)** | *Live Reality & Simulation Dry-Run* | - Rehearse live demonstration scenario: trigger file creation, launch process, run MySQL transactions<br>- Test all tone variants (Light, Dark, Blue) and themes (Default, Orchid, Cobalt, Coral)<br>- Confirm headline contrast and 3D trace diagram clarity | Zero contrast clipping<br>Interactive labs render Gantt charts cleanly<br>Blast radius returns deterministic trees |
-| **Sunday (Day 3)** | *Pre-Demonstration Lock & Backup* | - Verify offline sample mode fallback (`Sample Mode` toggle in UI)<br>- Export backup MySQL dump (`mysqldump -u root -p os_dbx > backup_demo.sql`)<br>- Validate quick sign-in presets on Auth page (`admin` & `abc`) | Offline fallback functions with 0 latency<br>Backup database restorable in < 60s<br>1-click login verified |
-| **Monday (Demo Day)** | *Phase-III Viva Execution* | - 09:00: Launch MySQL, Backend, Frontend<br>- 09:15: Execute Flagship Guided Trace walkthrough<br>- 09:30: Demonstrate live Windows PID <--> MySQL socket correlation | 100% viva presentation success |
-
----
-
-## Troubleshooting & Rollback Playbook
-
-1. **Session Expired / 401 Unauthorized**:
-   - The UI automatically catches 401 responses, broadcasts `osdbx:session-expired`, and displays the sign-in screen.
-   - Click the **"Fill Demo User"** or **"Fill Admin"** quick preset on the sign-in form to re-authenticate with 1 click.
-2. **MySQL Connection Refused**:
-   - Verify MySQL service is active: `Get-Service MySQL80` or `net start MySQL80`.
-   - Check credentials in `backend/.env`.
-3. **Live OS Collector Note**:
-   - If running in Docker or non-Windows, the UI displays "Offline demo dataset" or graceful ingest status without crashing.
-   - To inspect physical Windows sockets, run the backend natively on Windows with PowerShell.
+- **401/session expired:** Sign in again. There are no quick-fill demo credentials.
+- **MySQL connection failure:** Check the backend database host, application username, password, schema, and grants. For an existing Compose volume, check that `osdbx_app` was provisioned; initialization only applies to a new volume.
+- **No Windows host events in Docker:** The Compose stack observes its containers. Run and configure the host agent separately to forward host events.
+- **No durable OS-event history:** Check that `EVENT_STORAGE=mysql` is selected and that the backend database schema and grants are valid. Memory mode is cleared when the backend restarts.
+- **Cannot inspect host sockets:** Run the relevant collector where those sockets are visible and verify OS permissions. Forwarded event data alone does not guarantee direct socket correlation.

@@ -17,7 +17,9 @@ uvicorn==0.52.4
 
 # Authentication dependencies (passlib removed - use bcrypt directly for Python 3.12 compat)
 bcrypt==5.0.0
-python-jose==3.5.0
-python-multipart==0.0.20
+PyJWT==2.15.1
+python-multipart==0.0.32
+psutil==7.2.2
+watchdog==6.0.0
 requests==2.32.4
 rich==15.0.0
