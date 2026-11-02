@@ -9,7 +9,7 @@ from app.config.settings import settings
 
 _conn_lock = threading.Lock()
 _last_failure_time = 0.0
-_COOLDOWN_SECONDS = 5.0
+_COOLDOWN_SECONDS = 20.0
 _connect_host = "127.0.0.1" if settings.mysql_host.strip().lower() in {"localhost", ""} else settings.mysql_host
 
 # Create a module-level connection pool

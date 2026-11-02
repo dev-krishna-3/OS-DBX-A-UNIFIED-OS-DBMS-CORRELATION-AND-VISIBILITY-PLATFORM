@@ -520,26 +520,28 @@ def run_sync_simulation(req: SyncSimulationRequest) -> Dict[str, Any]:
             log.append(f"Step {i}: Producer produced item #{i} -> Consumer consumed item #{i}")
     log_text = "\n".join(log)
     
-    try:
-        from app.config.database import get_connection
-        conn = get_connection()
+    from app.config.settings import settings
+    if settings.event_storage.strip().lower() != "memory":
         try:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO simulations (type, algorithm, created_by, created_at, status) VALUES ('SYNCHRONIZATION', %s, 1, NOW(), 'COMPLETED')",
-                (req.problem_type,)
-            )
-            sim_id = cur.lastrowid
-            cur.execute(
-                "INSERT INTO synchronization_experiments (simulation_id, problem_type, result_log) VALUES (%s, %s, %s)",
-                (sim_id, req.problem_type, log_text)
-            )
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    except Exception:
-        pass
+            from app.config.database import get_connection
+            conn = get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO simulations (type, algorithm, created_by, created_at, status) VALUES ('SYNCHRONIZATION', %s, 1, NOW(), 'COMPLETED')",
+                    (req.problem_type,)
+                )
+                sim_id = cur.lastrowid
+                cur.execute(
+                    "INSERT INTO synchronization_experiments (simulation_id, problem_type, result_log) VALUES (%s, %s, %s)",
+                    (sim_id, req.problem_type, log_text)
+                )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        except Exception:
+            pass
 
     return {
         "problem_type": req.problem_type,

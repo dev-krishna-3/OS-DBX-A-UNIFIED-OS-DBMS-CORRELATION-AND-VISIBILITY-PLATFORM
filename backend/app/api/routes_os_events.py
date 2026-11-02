@@ -442,11 +442,12 @@ def _cached_snapshot(key: str, builder) -> list[dict]:
             with _snapshot_lock:
                 _snapshot_refreshing.discard(key)
 
-    if cached is None:
-        return _rebuild()
     if should_refresh:
         threading.Thread(target=_rebuild, daemon=True).start()
-    return cached[1]
+
+    if cached is not None:
+        return cached[1]
+    return []
 
 
 def _build_process_snapshot() -> list[dict]:

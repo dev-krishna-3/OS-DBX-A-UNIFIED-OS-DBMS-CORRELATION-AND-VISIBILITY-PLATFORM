@@ -18,13 +18,8 @@ class IdentityBridgeService:
         self.has_access_denied = False
 
     def _get_mysql_connection(self):
-        return mysql.connector.connect(
-            host=self.host,
-            port=self.port,
-            user=self.user,
-            password=self.password,
-            database=self.database
-        )
+        from app.config.database import get_connection
+        return get_connection()
 
     def is_admin_mode(self) -> bool:
         """Check if process has Administrator privileges on Windows / root on Linux."""
@@ -89,11 +84,14 @@ class IdentityBridgeService:
 
     def build_pid_to_connection_map(self) -> dict[int, int]:
         """Builds a map of OS PID -> MySQL PROCESSLIST_ID."""
-        client_ports = self.get_os_client_ports()
-        pid_map: dict[int, int] = {}
         conn = None
         try:
             conn = self._get_mysql_connection()
+        except Exception:
+            return {}
+        client_ports = self.get_os_client_ports()
+        pid_map: dict[int, int] = {}
+        try:
             cursor = conn.cursor(dictionary=True)
             my_conn_id = getattr(conn, "connection_id", None)
             cursor.execute("SELECT ID, HOST FROM information_schema.processlist WHERE HOST IS NOT NULL")
