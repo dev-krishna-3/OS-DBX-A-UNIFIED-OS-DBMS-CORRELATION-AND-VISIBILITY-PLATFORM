@@ -49,18 +49,18 @@ if not exist "%ROOT_DIR%frontend\dist\index.html" (
 )
 
 :: 5. Launch Browser after 2 seconds in background
-start "" /b powershell -Command "Start-Sleep -Seconds 2; Start-Process 'http://127.0.0.1:8000'"
+start "" /b powershell -Command "Start-Sleep -Seconds 2; Start-Process 'http://localhost:8000'"
 
-:: 6. Start Unified FastAPI Server
+:: 6. Start Unified FastAPI Server (0.0.0.0 allows other PCs on network to connect)
 echo.
 echo ======================================================================
 echo  [✓] OS-DBX Platform is running!
-echo  URL:   http://127.0.0.1:8000
-echo  API:   http://127.0.0.1:8000/docs
-echo  Admin account password is set with ADMIN_PASSWORD.
+echo  Local URL:    http://localhost:8000
+echo  Network URL:  http://%COMPUTERNAME%:8000
+echo  API Docs:     http://localhost:8000/docs
 echo ======================================================================
 echo.
 echo Press CTRL+C to stop the platform.
 echo.
 
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
