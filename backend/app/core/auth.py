@@ -158,6 +158,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
     except jwt.InvalidTokenError:
         raise credentials_exception
 
+    from app.config.settings import settings
+    uname = token_data.username.strip().casefold()
+    if settings.event_storage.strip().lower() == 'memory' or uname in _memory_users:
+        mem_user = _memory_users.get(uname)
+        if mem_user:
+            return mem_user
+
     # Open a dedicated connection just for the auth lookup — do not share
     # this with the route handler's Depends(get_connection).
     try:

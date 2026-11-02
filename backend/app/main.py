@@ -56,6 +56,8 @@ def seed_admin_account() -> None:
         raise RuntimeError("ADMIN_PASSWORD must be configured in production")
     if admin_password and len(admin_password.encode("utf-8")) < 12:
         raise RuntimeError("ADMIN_PASSWORD must be at least 12 characters")
+    if settings.event_storage.strip().lower() == "memory":
+        return
     try:
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
@@ -143,13 +145,13 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         from app.api import routes_os_events as _os_routes
         while True:
             try:
-                await asyncio.sleep(4.0)
-                _os_routes.list_processes()
-                _os_routes.list_resource_metrics()
+                await asyncio.sleep(8.0)
+                await asyncio.to_thread(_os_routes.list_processes)
+                await asyncio.to_thread(_os_routes.list_resource_metrics)
             except asyncio.CancelledError:
                 break
             except Exception:
-                await asyncio.sleep(5.0)
+                await asyncio.sleep(10.0)
     
     # 1. Start continuous automatic DBMS observation poller
     async def _consume_dbms_poller():
@@ -161,7 +163,13 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
         while True:
             try:
                 await asyncio.sleep(1.5)
-                conn = get_connection()
+                if settings.event_storage.strip().lower() == "memory":
+                    await asyncio.sleep(8.5)
+                try:
+                    conn = await asyncio.to_thread(get_connection)
+                except Exception:
+                    await asyncio.sleep(5.0)
+                    continue
                 try:
                     collector = MySQLQueryCollector(
                         conn,
@@ -334,7 +342,15 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
                             else:
                                 batch.append(nxt)
 
-                        conn = get_connection()
+                        if settings.event_storage.strip().lower() == "memory":
+                            await asyncio.sleep(0.05)
+                            continue
+
+                        try:
+                            conn = await asyncio.to_thread(get_connection)
+                        except Exception:
+                            await asyncio.sleep(1.0)
+                            continue
                         try:
                             cursor = conn.cursor()
                             for item in batch:

@@ -466,6 +466,8 @@ def _build_process_snapshot() -> list[dict]:
             "state": info.get("state")
         })
     sorted_res = sorted(result, key=lambda x: x["pid"])
+    if settings.event_storage.strip().lower() == "memory":
+        return sorted_res
     try:
         from app.config.database import get_connection
         conn = get_connection()
@@ -503,6 +505,8 @@ def _build_resource_snapshot() -> list[dict]:
         metrics = collect_metrics()
     except Exception:
         return []
+    if settings.event_storage.strip().lower() == "memory":
+        return metrics
     try:
         from app.config.database import get_connection
         conn = get_connection()
