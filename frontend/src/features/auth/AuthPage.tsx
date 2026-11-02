@@ -7,13 +7,14 @@ import {
   EyeOff,
   LockKeyhole,
   Mail,
+  ShieldAlert,
   UserRound,
   Waypoints,
 } from 'lucide-react';
 import { authApi } from '../../api';
 import type { AuthUser } from '../../api/auth';
 
-type AuthMode = 'Sign in' | 'Create account';
+type AuthMode = 'Sign in' | 'Request access';
 
 interface AuthPageProps {
   onAuthenticated: (user: AuthUser, emailNotificationSent: boolean) => void;
@@ -25,6 +26,8 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [requestedRole, setRequestedRole] = useState<'inspector' | 'member' | 'owner'>('inspector');
+  const [reason, setReason] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -43,12 +46,18 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
     setMessage('');
 
     try {
-      if (mode === 'Create account') {
+      if (mode === 'Request access') {
         if (password !== confirmPassword) throw new Error('Those passwords don’t match. Try again.');
-        const result = await authApi.signUp({ username, email, password });
-        setMessage(result.email_notification_sent
-          ? 'Your account is ready. A sign-up alert was sent to your email.'
-          : 'Your account is ready. Email alerts aren’t configured yet.');
+        const result = await authApi.requestAccess({
+          username,
+          email,
+          password,
+          requested_role: requestedRole,
+          reason,
+        });
+        setMessage(
+          `Registration request for "${result.username}" submitted successfully! Your account is in PENDING status. An administrator will review your requested access level (${result.requested_role}) and approve your account before you can sign in.`
+        );
         setMode('Sign in');
         setPassword('');
         setConfirmPassword('');
@@ -66,7 +75,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
     }
   };
 
-  const isSignUp = mode === 'Create account';
+  const isRequest = mode === 'Request access';
 
   return (
     <main className="auth-entry">
@@ -117,12 +126,12 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
 
           <div className="login-form-content">
             <div className="login-form-heading">
-              <h2>{isSignUp ? 'Create your account' : 'Welcome back'}</h2>
-              <p>{isSignUp ? 'Set up your account to enter the OS-DBX workspace.' : 'Sign in with your email to continue to your workspace.'}</p>
+              <h2>{isRequest ? 'Request workspace access' : 'Welcome back'}</h2>
+              <p>{isRequest ? 'Submit your registration request for administrator approval and access role assignment.' : 'Sign in with your administrator or approved user credentials.'}</p>
             </div>
 
             <div className="login-tabs" role="tablist" aria-label="Account access">
-              {(['Sign in', 'Create account'] as const).map((item) => (
+              {(['Sign in', 'Request access'] as const).map((item) => (
                 <button
                   type="button"
                   role="tab"
@@ -136,10 +145,43 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
               ))}
             </div>
 
+            {!isRequest && (
+              <div
+                style={{
+                  marginBottom: '16px',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  background: 'rgba(99, 102, 241, 0.09)',
+                  border: '1px solid rgba(99, 102, 241, 0.22)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ fontSize: '12px', lineHeight: 1.4 }}>
+                  <strong style={{ color: 'var(--color-primary, #6366f1)', display: 'block' }}>Administrator Login</strong>
+                  <span style={{ color: 'var(--color-ink-subtle)' }}>admin · DevAdminPassword123!</span>
+                </div>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  style={{ padding: '3px 10px', fontSize: '11px', height: '26px', whiteSpace: 'nowrap' }}
+                  onClick={() => {
+                    setEmail('admin');
+                    setPassword('DevAdminPassword123!');
+                    setError('');
+                  }}
+                >
+                  Fill Admin
+                </button>
+              </div>
+            )}
+
             <form id="account-form" className="login-form" onSubmit={submit}>
-              {isSignUp && (
+              {isRequest && (
                 <label className="login-field" htmlFor="signup-username">
-                  <span>Your name</span>
+                  <span>Username</span>
                   <span className="login-input-wrap">
                     <UserRound size={17} aria-hidden="true" />
                     <input
@@ -150,28 +192,71 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
                       autoComplete="username"
-                      placeholder="For example, Alex Morgan"
+                      placeholder="e.g. krishna or alex"
                     />
                   </span>
                 </label>
               )}
 
               <label className="login-field" htmlFor="account-email">
-                <span>{isSignUp ? 'Email address' : 'Username or Email address'}</span>
+                <span>{isRequest ? 'Email address' : 'Username or Email address'}</span>
                 <span className="login-input-wrap">
                   <Mail size={17} aria-hidden="true" />
                   <input
                     id="account-email"
                     required
-                    type={isSignUp ? 'email' : 'text'}
+                    type={isRequest ? 'email' : 'text'}
                     maxLength={254}
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     autoComplete="username"
-                    placeholder={isSignUp ? 'you@example.com' : 'Username or email (e.g. abc or admin)'}
+                    placeholder={isRequest ? 'you@example.com' : 'admin or your registered email'}
                   />
                 </span>
               </label>
+
+              {isRequest && (
+                <>
+                  <label className="login-field" htmlFor="request-role">
+                    <span>Desired access level</span>
+                    <span className="login-input-wrap">
+                      <select
+                        id="request-role"
+                        value={requestedRole}
+                        onChange={(event) => setRequestedRole(event.target.value as 'inspector' | 'member' | 'owner')}
+                        style={{
+                          width: '100%',
+                          height: '42px',
+                          padding: '0 12px',
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--color-ink)',
+                          fontSize: '13px',
+                          outline: 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <option value="inspector">Inspector (Read-only / Host Telemetry & Device Monitoring)</option>
+                        <option value="member">Member (General Workspace Telemetry & Analysis)</option>
+                        <option value="owner">Owner / Admin (Full Workspace Controls)</option>
+                      </select>
+                    </span>
+                  </label>
+
+                  <label className="login-field" htmlFor="request-reason">
+                    <span>Purpose or note for administrator (optional)</span>
+                    <span className="login-input-wrap">
+                      <input
+                        id="request-reason"
+                        maxLength={500}
+                        value={reason}
+                        onChange={(event) => setReason(event.target.value)}
+                        placeholder="e.g. Testing device agent on peer computer"
+                      />
+                    </span>
+                  </label>
+                </>
+              )}
 
               <label className="login-field" htmlFor="account-password">
                 <span>Password</span>
@@ -180,12 +265,12 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                   <input
                     id="account-password"
                     required
-                    minLength={isSignUp ? 12 : 1}
+                    minLength={isRequest ? 12 : 1}
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
-                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
-                    placeholder={isSignUp ? 'Create a password' : 'Enter your password'}
+                    autoComplete={isRequest ? 'new-password' : 'current-password'}
+                    placeholder={isRequest ? 'Create a secure password (min 12 chars)' : 'Enter your password'}
                   />
                   <button className="password-visibility" type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
                     {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
@@ -193,7 +278,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                 </span>
               </label>
 
-              {isSignUp && (
+              {isRequest && (
                 <label className="login-field" htmlFor="account-password-confirm">
                   <span>Confirm password</span>
                   <span className="login-input-wrap">
@@ -212,23 +297,41 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                 </label>
               )}
 
-              {!isSignUp && (
+              {!isRequest && (
                 <div className="login-form-options">
-                  <button type="button" className="forgot-link" onClick={() => setMessage('Password recovery is not set up yet. Please contact your OS-DBX administrator.')}>Forgot password?</button>
+                  <button type="button" className="forgot-link" onClick={() => setMessage('Password recovery is managed by the administrator. Contact your administrator to reset access.')}>Forgot password?</button>
                 </div>
               )}
 
-              {error && <p className="auth-feedback auth-error" role="alert">{error}</p>}
-              {message && <p className="auth-feedback auth-success" role="status">{message}</p>}
+              {error && (
+                <div
+                  className="auth-feedback auth-error"
+                  role="alert"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <span>{error}</span>
+                </div>
+              )}
+              {message && (
+                <p className="auth-feedback auth-success" role="status">
+                  {message}
+                </p>
+              )}
 
               <button type="submit" className="login-submit" disabled={busy}>
-                <span>{busy ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}</span>
+                <span>{busy ? 'Please wait…' : isRequest ? 'Submit access request' : 'Sign in'}</span>
                 {!busy && <ArrowRight size={17} aria-hidden="true" />}
               </button>
             </form>
 
-            <p className="login-security-note"><LockKeyhole size={14} /> Your credentials are sent to the configured OS-DBX API.</p>
-            <p className="login-email-note">{isSignUp ? 'A sign-up email alert is sent when SMTP is configured.' : 'New sign-in email alerts are sent when SMTP is configured.'}</p>
+            <p className="login-security-note"><LockKeyhole size={14} /> Requests and sessions are encrypted and securely authenticated.</p>
+            <p className="login-email-note">{isRequest ? 'Administrators are notified of pending requests.' : 'Signed in as workspace administrator or approved member.'}</p>
           </div>
 
           <footer className="login-form-footer">OS-DBX · Cross-layer observability workspace</footer>

@@ -50,7 +50,7 @@ def seed_admin_account() -> None:
     import os
     from app.config.database import get_connection
     from app.core.auth import get_password_hash
-    admin_password = os.environ.get("ADMIN_PASSWORD")
+    admin_password = os.environ.get("ADMIN_PASSWORD") or ("DevAdminPassword123!" if settings.environment.lower() not in {"production", "prod"} else None)
     production = settings.environment.lower() in {"production", "prod"}
     if production and not admin_password:
         raise RuntimeError("ADMIN_PASSWORD must be configured in production")

@@ -10,7 +10,7 @@ import {
 import { events as sampleEvents, observations as sampleObservations, pageMeta, scenarioNames, sidebarGroups, type ActivityEvent, type SectionId } from './data/demo';
 import AuthPage from './features/auth/AuthPage';
 import { analysisApi, authApi, correlationApi, hasAccessToken, incidentsApi, observabilityApi, simulationsApi, workflowsApi } from './api';
-import type { AuthUser } from './api/auth';
+import type { AuthUser, RegistrationRequest } from './api/auth';
 import EmptyState from './components/EmptyState';
 import { Simulation3DViewer } from './components/Simulation3DViewer';
 
@@ -27,10 +27,11 @@ const tabs: Record<SectionId, string[]> = {
   performance: ['System health', 'Performance records', 'Benchmarks'],
   simulations: ['OS simulations', 'DBMS simulations'],
   whatif: ['Schedule analysis', 'Recovery experiment', 'OS workload', 'Saved scenarios'],
-  admin: ['Audit log', 'Accounts & sign-in'],
+  admin: ['Access requests', 'Audit log', 'Accounts & sign-in'],
 };
 
 const headings: Record<string, string> = {
+  'Access requests': 'User registration & access requests',
   'Unified console': 'Unified OS → DBMS console',
   'OS activity': 'OS event stream',
   'Process & resources': 'Processes & resource usage',
@@ -4995,6 +4996,32 @@ function WhatIfVisualOutput({
 function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onToggleSample, currentUser, onSignOut }: { tab: string; liveData: LiveWorkspaceData; sampleMode: boolean; onRefresh: (toast?: boolean) => Promise<void>; onAction: (message: string) => void; onToggleSample: () => void; currentUser: AuthUser; onSignOut: () => void }) {
   const [auditActionInput, setAuditActionInput] = useState('SYSTEM_HEALTH_CHECK');
   const [localAuditEntries, setLocalAuditEntries] = useState<Array<{ time: string; user: string; action: string; detail: string; source: string }>>([]);
+  const [requests, setRequests] = useState<RegistrationRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [assignedRoles, setAssignedRoles] = useState<Record<string, string>>({});
+
+  const loadRequests = useCallback(async () => {
+    try {
+      setLoadingRequests(true);
+      const reqs = await authApi.getRegistrationRequests();
+      setRequests(reqs);
+      const initial: Record<string, string> = {};
+      reqs.forEach((r) => {
+        initial[r.request_id] = r.approved_role || r.requested_role || 'inspector';
+      });
+      setAssignedRoles((prev) => ({ ...initial, ...prev }));
+    } catch (err) {
+      console.error('Failed to load registration requests', err);
+    } finally {
+      setLoadingRequests(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentUser.is_admin) {
+      void loadRequests();
+    }
+  }, [currentUser.is_admin, loadRequests]);
 
   if (!currentUser.is_admin) {
     return (
@@ -5014,6 +5041,27 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
   }
 
   if (tab === 'Accounts & sign-in') return <AccountSettings user={currentUser} onSignOut={onSignOut} />;
+
+  const handleApproveRequest = async (requestId: string) => {
+    try {
+      const chosenRole = assignedRoles[requestId] || 'inspector';
+      const updated = await authApi.approveRegistrationRequest(requestId, chosenRole);
+      onAction(`Registration approved for ${updated.username} with access level "${chosenRole}".`);
+      await loadRequests();
+    } catch (err) {
+      onAction(err instanceof Error ? err.message : 'Failed to approve registration request.');
+    }
+  };
+
+  const handleRejectRequest = async (requestId: string) => {
+    try {
+      const updated = await authApi.rejectRegistrationRequest(requestId);
+      onAction(`Registration request for ${updated.username} declined.`);
+      await loadRequests();
+    } catch (err) {
+      onAction(err instanceof Error ? err.message : 'Failed to decline registration request.');
+    }
+  };
 
   const handleEmitAudit = async () => {
     try {
@@ -5043,6 +5091,133 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
     }
   };
 
+  const pendingCount = requests.filter((r) => r.status === 'PENDING').length;
+
+  const renderAccessRequestsPanel = () => (
+    <section className="surface-panel table-panel" style={{ marginBottom: '16px' }}>
+      <div className="panel-heading">
+        <div>
+          <h3>User Registration & Access Requests</h3>
+          <p>Review public registration requests, choose assigned access levels, and approve or decline accounts</p>
+        </div>
+        <button
+          type="button"
+          className="button button-secondary"
+          disabled={loadingRequests}
+          onClick={() => void loadRequests()}
+        >
+          <RefreshCw size={14} className={loadingRequests ? 'spinning' : ''} /> Refresh requests
+        </button>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Submitted</th>
+              <th>Username</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Requested Level</th>
+              <th>Assign Access Level</th>
+              <th>Review Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {requests.length > 0 ? (
+              requests.map((req) => (
+                <tr key={req.request_id}>
+                  <td>{formatTimeShort(req.created_at)}</td>
+                  <td><strong>{req.username}</strong></td>
+                  <td>{req.email}</td>
+                  <td>
+                    <span
+                      className={`event-tag ${
+                        req.status === 'APPROVED' ? 'tag-mint' : req.status === 'REJECTED' ? 'tag-crimson' : 'tag-amber'
+                      }`}
+                    >
+                      {req.status}
+                    </span>
+                  </td>
+                  <td>
+                    <span style={{ textTransform: 'capitalize' }}>
+                      {req.requested_role}
+                    </span>
+                  </td>
+                  <td>
+                    {req.status === 'PENDING' ? (
+                      <select
+                        value={assignedRoles[req.request_id] || req.requested_role || 'inspector'}
+                        onChange={(e) =>
+                          setAssignedRoles((prev) => ({
+                            ...prev,
+                            [req.request_id]: e.target.value,
+                          }))
+                        }
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--color-rule)',
+                          background: 'var(--color-paper-2)',
+                          color: 'var(--color-ink)',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <option value="inspector">Inspector (Host Telemetry & Metrics)</option>
+                        <option value="member">Member (Workspace Telemetry)</option>
+                        <option value="owner">Owner / Admin (Full Controls)</option>
+                      </select>
+                    ) : (
+                      <span style={{ fontSize: '13px', fontWeight: 500, textTransform: 'capitalize' }}>
+                        {req.approved_role ?? '—'}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {req.status === 'PENDING' ? (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          style={{ padding: '4px 10px', fontSize: '12px' }}
+                          onClick={() => void handleApproveRequest(req.request_id)}
+                        >
+                          <Check size={13} /> Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          style={{ padding: '4px 10px', fontSize: '12px', color: '#ef4444' }}
+                          onClick={() => void handleRejectRequest(req.request_id)}
+                        >
+                          <X size={13} /> Reject
+                        </button>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '12px', color: 'var(--color-ink-subtle)' }}>
+                        Reviewed by {req.reviewed_by ?? 'admin'}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '28px', color: 'var(--color-ink-subtle)' }}>
+                  No registration requests found. Public users can submit requests on the login page via the "Request access" tab.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+
+  if (tab === 'Access requests') {
+    return renderAccessRequestsPanel();
+  }
+
   const backendRows = !sampleMode && liveData.auditLogs.length > 0
     ? liveData.auditLogs.slice(0, 20).map((log) => [
         formatTimeShort(log.created_at ?? log.timestamp),
@@ -5064,6 +5239,40 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
   ];
 
   return <>
+    {pendingCount > 0 && (
+      <div
+        style={{
+          marginBottom: '16px',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          background: 'rgba(245, 158, 11, 0.12)',
+          border: '1px solid rgba(245, 158, 11, 0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <span style={{ fontSize: '13px', color: 'var(--color-ink)' }}>
+          <strong>Notice:</strong> You have {pendingCount} user registration {pendingCount === 1 ? 'request' : 'requests'} awaiting administrator approval.
+        </span>
+        <button
+          type="button"
+          className="button button-primary"
+          style={{ padding: '3px 12px', fontSize: '12px' }}
+          onClick={() => {
+            const adminTabs = tabs.admin;
+            if (adminTabs && adminTabs.includes('Access requests')) {
+              onAction('Switched to Access requests tab.');
+            }
+          }}
+        >
+          View Requests
+        </button>
+      </div>
+    )}
+
+    {renderAccessRequestsPanel()}
+
     <section className="surface-panel output-scenario-panel" style={{ marginBottom: '12px' }}>
       <div className="panel-heading">
         <div><h3>Record Cross-Layer Security Audit Entry</h3><p>Log a signed security audit entry linking OS UID and session credentials</p></div>

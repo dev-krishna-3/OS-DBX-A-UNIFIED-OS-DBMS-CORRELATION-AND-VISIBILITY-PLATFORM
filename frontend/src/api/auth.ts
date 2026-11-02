@@ -25,6 +25,27 @@ export interface RegisterRequest {
   password: string;
 }
 
+export interface RegistrationRequest {
+  request_id: string;
+  username: string;
+  email: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  requested_role: string;
+  approved_role?: string | null;
+  reason?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+}
+
+export interface SubmitRegistrationRequestPayload {
+  username: string;
+  email: string;
+  password: string;
+  requested_role?: string;
+  reason?: string;
+}
+
 export const authApi = {
   async signIn(email: string, password: string): Promise<AuthResult> {
     const body = new URLSearchParams({ username: email, password });
@@ -39,6 +60,24 @@ export const authApi = {
 
   signUp(payload: RegisterRequest): Promise<RegistrationResult> {
     return postJson<RegistrationResult>('/auth/register', payload);
+  },
+
+  requestAccess(payload: SubmitRegistrationRequestPayload): Promise<RegistrationRequest> {
+    return postJson<RegistrationRequest>('/auth/request-access', payload);
+  },
+
+  getRegistrationRequests(): Promise<RegistrationRequest[]> {
+    return apiRequest<RegistrationRequest[]>('/auth/admin/requests');
+  },
+
+  approveRegistrationRequest(requestId: string, approvedRole: string): Promise<RegistrationRequest> {
+    return postJson<RegistrationRequest>(`/auth/admin/requests/${requestId}/approve`, {
+      approved_role: approvedRole,
+    });
+  },
+
+  rejectRegistrationRequest(requestId: string): Promise<RegistrationRequest> {
+    return postJson<RegistrationRequest>(`/auth/admin/requests/${requestId}/reject`, {});
   },
 
   currentUser(): Promise<AuthUser> {
