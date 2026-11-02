@@ -1,7 +1,25 @@
 type RequestOptions = Omit<RequestInit, 'headers'> & { headers?: HeadersInit };
 
-const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-const apiBaseUrl = (rawBaseUrl || '').replace(/\/+$/, '');
+function resolveApiBaseUrl(): string {
+  const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+  if (typeof window !== 'undefined') {
+    // If the web app is loaded over HTTPS (like a Cloudflare tunnel), avoid mixed content errors
+    if (window.location.protocol === 'https:' && rawBaseUrl?.startsWith('http://')) {
+      return '';
+    }
+    // If accessed via external IP or domain, use relative path so the dev server proxies it properly
+    if (
+      window.location.hostname !== 'localhost' &&
+      window.location.hostname !== '127.0.0.1' &&
+      rawBaseUrl?.includes('127.0.0.1')
+    ) {
+      return '';
+    }
+  }
+  return (rawBaseUrl || '').replace(/\/+$/, '');
+}
+
+const apiBaseUrl = resolveApiBaseUrl();
 const accessTokenKey = 'osdbx_access_token';
 const workspaceIdKey = 'osdbx_workspace_id';
 
