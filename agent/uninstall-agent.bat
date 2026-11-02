@@ -19,6 +19,7 @@ if exist "%AGENT_DIR%agent.pid" (
 )
 
 :: 2. Safety process cleanup
+taskkill /F /IM osdbx-agent.exe >nul 2>&1
 for /f "tokens=2" %%p in ('wmic process where "CommandLine like '%%osdbx_agent.py%%'" get ProcessId 2^>nul ^| findstr [0-9]') do (
     echo [*] Terminating lingering agent process %%p...
     taskkill /F /PID %%p >nul 2>&1

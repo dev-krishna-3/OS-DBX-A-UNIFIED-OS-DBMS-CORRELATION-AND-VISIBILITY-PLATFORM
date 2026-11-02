@@ -7,13 +7,25 @@ echo       OS-DBX: Enterprise Endpoint Forensic Agent Installer
 echo ======================================================================
 echo.
 
-:: 1. Check Python installation
-where python >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Python is not installed on this system.
-    echo Please install Python 3.10+ from https://python.org or Windows Store.
-    pause
-    exit /b 1
+:: 1. Check Execution Mode (Standalone Binary vs System Python)
+set "AGENT_DIR=%~dp0"
+set "EXE_PATH=%AGENT_DIR%bin\osdbx-agent.exe"
+set "USE_EXE=0"
+
+if exist "%EXE_PATH%" (
+    echo [*] Standalone collector binary detected: %EXE_PATH%
+    echo [*] No Python or tool installation required on this system.
+    set "USE_EXE=1"
+) else (
+    where python >nul 2>&1
+    if !ERRORLEVEL! neq 0 (
+        echo [ERROR] Python is not installed on this system, and bin\osdbx-agent.exe was not found.
+        echo Either:
+        echo   1. Copy the standalone bin\osdbx-agent.exe onto this PC (Recommended - Zero install).
+        echo   2. Install Python 3.10+ from https://python.org.
+        pause
+        exit /b 1
+    )
 )
 
 :: 2. Target Server URL & Device Credential
@@ -38,30 +50,42 @@ echo [*] Target Host:   %COMPUTERNAME%
 echo.
 
 :: 4. Verify / Install Dependencies
-echo [*] Checking required forensic libraries (psutil, watchdog)...
-python -m pip install --quiet psutil watchdog
+if !USE_EXE! equ 0 (
+    echo [*] Checking required forensic libraries (psutil, watchdog)...
+    python -m pip install --quiet psutil watchdog
+)
 
 :: 5. Register Auto-start Task on Windows Boot/Logon
-echo [*] Registering silent startup task in Windows Task Scheduler...
+echo [*] Registering startup task in Windows Task Scheduler...
 set "TASK_NAME=OSDBX_Forensic_Agent"
-set "PYTHONW_PATH="
-for /f "delims=" %%i in ('where pythonw 2^>nul') do (
-    if not defined PYTHONW_PATH set "PYTHONW_PATH=%%i"
-)
-if "%PYTHONW_PATH%"=="" (
-    for /f "delims=" %%i in ('where python 2^>nul') do (
-        if not defined PYTHONW_PATH set "PYTHONW_PATH=%%~dpi\pythonw.exe"
+
+if !USE_EXE! equ 1 (
+    set "RUN_CMD=\"%EXE_PATH%\""
+) else (
+    set "PYTHONW_PATH="
+    for /f "delims=" %%i in ('where pythonw 2^>nul') do (
+        if not defined PYTHONW_PATH set "PYTHONW_PATH=%%i"
     )
+    if "%PYTHONW_PATH%"=="" (
+        for /f "delims=" %%i in ('where python 2^>nul') do (
+            if not defined PYTHONW_PATH set "PYTHONW_PATH=%%~dpi\pythonw.exe"
+        )
+    )
+    set "RUN_CMD=\"!PYTHONW_PATH!\" \"%AGENT_DIR%osdbx_agent.py\""
 )
 
-schtasks /Create /TN "%TASK_NAME%" /TR "\"%PYTHONW_PATH%\" \"%AGENT_DIR%osdbx_agent.py\"" /SC ONLOGON /RL HIGHEST /F >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    schtasks /Create /TN "%TASK_NAME%" /TR "\"%PYTHONW_PATH%\" \"%AGENT_DIR%osdbx_agent.py\"" /SC ONLOGON /F >nul 2>&1
+schtasks /Create /TN "%TASK_NAME%" /TR "!RUN_CMD!" /SC ONLOGON /RL HIGHEST /F >nul 2>&1
+if !ERRORLEVEL! neq 0 (
+    schtasks /Create /TN "%TASK_NAME%" /TR "!RUN_CMD!" /SC ONLOGON /F >nul 2>&1
 )
 
 :: 6. Launch the Agent right now in the background
-echo [*] Launching silent background collector...
-start "" "%PYTHONW_PATH%" "%AGENT_DIR%osdbx_agent.py"
+echo [*] Launching background collector...
+if !USE_EXE! equ 1 (
+    start "" "%EXE_PATH%"
+) else (
+    start "" "%PYTHONW_PATH%" "%AGENT_DIR%osdbx_agent.py"
+)
 
 echo.
 echo ======================================================================

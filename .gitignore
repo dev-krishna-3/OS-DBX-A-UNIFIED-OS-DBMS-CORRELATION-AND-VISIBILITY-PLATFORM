@@ -27,6 +27,7 @@ frontend/.env
 *.tsbuildinfo
 build/
 dist/
+agent/bin/
 
 # OS
 .DS_Store

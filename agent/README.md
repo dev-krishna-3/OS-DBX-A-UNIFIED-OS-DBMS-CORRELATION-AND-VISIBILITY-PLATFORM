@@ -13,7 +13,23 @@ A lightweight, silent digital forensics collector designed for enterprise incide
 
 ---
 
-## 1-Minute Quick Start
+## Zero-Prerequisite Standalone Mode (No Python Required)
+
+For target PCs where Python and developer tools are **not installed**:
+1. Copy `agent/bin/osdbx-agent.exe` (9.5 MB standalone binary) to a USB drive or download it onto the target PC.
+2. Run directly from PowerShell or Command Prompt:
+   ```cmd
+   osdbx-agent.exe --server http://<SERVER_IP>:8000
+   ```
+   Or double-click `install-agent.bat` (it automatically detects `bin\osdbx-agent.exe` and skips Python dependency checks).
+3. To build a fresh binary at any time, run:
+   ```cmd
+   build-agent-exe.bat
+   ```
+
+---
+
+## 1-Minute Quick Start (With Python)
 
 The API requires the unique credential issued when an owner enrolls a device. The current collector can send that value as `OSDBX_API_TOKEN`, but credential provisioning, protected storage, revocation UX, and the encrypted durable queue are not implemented end to end yet. Do not use a human administrator token for the agent; do not use this collector for a pilot yet.
 
