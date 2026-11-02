@@ -413,17 +413,36 @@ def normalize_server_url(raw: str) -> str:
     raw = (raw or "").strip()
     if not raw:
         return ""
-    if not raw.startswith("http://") and not raw.startswith("https://"):
+    tunnel_domains = (
+        ".trycloudflare.com",
+        ".loca.lt",
+        ".ngrok",
+        ".pinggy.link",
+        ".serveo.net",
+        ".herokuapp.com",
+        ".onrender.com",
+        ".railway.app",
+    )
+    is_known_tunnel = any(d in raw.lower() for d in tunnel_domains)
+    if is_known_tunnel:
+        if raw.startswith("http://"):
+            raw = f"https://{raw[7:]}"
+        elif not raw.startswith("https://"):
+            raw = f"https://{raw}"
+    elif not raw.startswith("http://") and not raw.startswith("https://"):
         raw = f"http://{raw}"
-    host_part = raw.split("://", 1)[1]
-    if ":" not in host_part and "/" not in host_part:
-        raw = f"{raw}:8000"
+
+    # Do not append :8000 if it is https:// or a known tunnel/cloud domain
+    if not raw.startswith("https://") and not is_known_tunnel:
+        host_part = raw.split("://", 1)[1]
+        if ":" not in host_part and "/" not in host_part:
+            raw = f"{raw}:8000"
     return raw.rstrip("/")
 
 
 def main():
     parser = argparse.ArgumentParser(description="OS-DBX Endpoint Forensic Collector")
-    parser.add_argument("--server", "-s", help="OS-DBX Server API URL (e.g. http://10.72.84.192:8000)")
+    parser.add_argument("--server", "-s", help="OS-DBX Server API URL (e.g. http://10.72.84.192:8000 or https://xyz.trycloudflare.com)")
     parser.add_argument("--host-id", help="Custom Host Identifier")
     parser.add_argument("--token", "-t", help="Device Bearer Token")
     parser.add_argument("--watch-path", "-w", help="Path to monitor for filesystem mutations (default: current directory)")
@@ -439,8 +458,9 @@ def main():
         print("          OS-DBX Forensic Collector Agent")
         print("=" * 66)
         saved_server = config.get("server_url") or "http://10.72.84.192:8000"
-        print("\nEnter your OS-DBX Server IP or Hostname:")
-        print("  - Examples: 10.72.84.192  OR  LAPTOP-GP6CB324  OR  192.168.1.5:8000\n")
+        print("\nEnter your OS-DBX Server IP, Hostname, or Tunnel URL:")
+        print("  - LAN Examples:    10.72.84.192  OR  LAPTOP-GP6CB324  OR  192.168.1.5:8000")
+        print("  - Tunnel Examples: https://xyz.trycloudflare.com  OR  https://xyz.loca.lt\n")
         try:
             prompt_text = f"Server IP / Hostname [Press Enter for {saved_server}]: "
             entered = input(prompt_text).strip()
