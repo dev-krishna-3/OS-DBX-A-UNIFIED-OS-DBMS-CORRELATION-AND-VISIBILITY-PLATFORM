@@ -114,12 +114,21 @@ class OSDBXAgent:
         )
         try:
             with urllib.request.urlopen(req, timeout=3.0) as resp:
-                return resp.status in (200, 201)
+                if resp.status in (200, 201):
+                    if getattr(self, "_had_conn_error", False):
+                        logging.info("[✓] Successfully connected to %s! Streaming live telemetry.", self.server_url)
+                        self._had_conn_error = False
+                    return True
+                return False
         except urllib.error.HTTPError as he:
             logging.debug("POST %s returned HTTP %d: %s", endpoint, he.code, he.reason)
             return False
         except Exception as e:
-            logging.debug("POST %s failed: %s", endpoint, e)
+            now = time.time()
+            if now - getattr(self, "_last_conn_warning_time", 0) > 30.0:
+                self._last_conn_warning_time = now
+                self._had_conn_error = True
+                logging.warning("Cannot reach %s (%s). Buffering events in memory...", self.server_url, e)
             return False
 
     def enqueue_event(self, event: dict):
@@ -400,67 +409,75 @@ def remove_pid_file():
             pass
 
 
+def normalize_server_url(raw: str) -> str:
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    if not raw.startswith("http://") and not raw.startswith("https://"):
+        raw = f"http://{raw}"
+    host_part = raw.split("://", 1)[1]
+    if ":" not in host_part and "/" not in host_part:
+        raw = f"{raw}:8000"
+    return raw.rstrip("/")
+
+
 def main():
     parser = argparse.ArgumentParser(description="OS-DBX Endpoint Forensic Collector")
-    parser.add_argument("--server", "-s", help="OS-DBX Server API URL (e.g. http://127.0.0.1:8000)")
+    parser.add_argument("--server", "-s", help="OS-DBX Server API URL (e.g. http://10.72.84.192:8000)")
     parser.add_argument("--host-id", help="Custom Host Identifier")
     parser.add_argument("--token", "-t", help="Device Bearer Token")
     parser.add_argument("--watch-path", "-w", help="Path to monitor for filesystem mutations (default: current directory)")
     args = parser.parse_args()
 
     config = load_config()
+
     if args.server:
-        config["server_url"] = args.server
+        config["server_url"] = normalize_server_url(args.server)
+    else:
+        # Prompt the user for server IP whenever run without --server flag
+        print("\n" + "=" * 66)
+        print("          OS-DBX Forensic Collector Agent")
+        print("=" * 66)
+        saved_server = config.get("server_url") or "http://10.72.84.192:8000"
+        print("\nEnter your OS-DBX Server IP or Hostname:")
+        print("  - Examples: 10.72.84.192  OR  LAPTOP-GP6CB324  OR  192.168.1.5:8000\n")
+        try:
+            prompt_text = f"Server IP / Hostname [Press Enter for {saved_server}]: "
+            entered = input(prompt_text).strip()
+            if entered:
+                config["server_url"] = normalize_server_url(entered)
+            else:
+                config["server_url"] = saved_server
+
+            default_host = config.get("host_id") or socket.gethostname()
+            entered_host = input(f"Host / PC Name       [Press Enter for '{default_host}']: ").strip()
+            if entered_host:
+                config["host_id"] = entered_host
+            else:
+                config["host_id"] = default_host
+
+            # Save to config.json next to executable so it remembers for next time
+            cfg_save_path = os.path.join(get_base_dir(), "config.json")
+            try:
+                with open(cfg_save_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "server_url": config["server_url"],
+                        "host_id": config["host_id"],
+                        "api_token": config.get("api_token", "osdbx-default-token")
+                    }, f, indent=2)
+            except Exception:
+                pass
+            print(f"\n[✓] Connecting to: {config['server_url']}")
+            print(f"[✓] Reporting as:  {config['host_id']}\n")
+        except (EOFError, KeyboardInterrupt):
+            pass
+
     if args.host_id:
         config["host_id"] = args.host_id
     if args.token:
         config["api_token"] = args.token
     if args.watch_path:
         config["watch_paths"] = [args.watch_path]
-
-    # If running interactively without a CLI server argument and localhost is unreachable, prompt for server
-    if not args.server and config["server_url"] in {"http://127.0.0.1:8000", "http://localhost:8000"}:
-        local_reachable = False
-        try:
-            req = urllib.request.Request("http://127.0.0.1:8000/health", method="GET")
-            with urllib.request.urlopen(req, timeout=0.6) as r:
-                if r.status in (200, 401, 403):
-                    local_reachable = True
-        except Exception:
-            local_reachable = False
-
-        if not local_reachable and sys.stdin and sys.stdin.isatty():
-            print("\n==============================================================")
-            print("  OS-DBX Enterprise Endpoint Forensic Collector")
-            print("==============================================================")
-            print("Local backend was not detected on http://127.0.0.1:8000.")
-            print("To stream metrics from this PC to your main OS-DBX server,")
-            print("enter your server address (e.g. 10.72.84.192:8000 or http://10.72.84.192:8000).\n")
-            try:
-                user_server = input("OS-DBX Server IP:Port [or press Enter for default]: ").strip()
-                if user_server:
-                    if not user_server.startswith("http://") and not user_server.startswith("https://"):
-                        user_server = f"http://{user_server}"
-                    config["server_url"] = user_server.rstrip("/")
-
-                    user_host = input(f"Host ID / PC name [or press Enter for '{config['host_id']}']: ").strip()
-                    if user_host:
-                        config["host_id"] = user_host
-
-                    # Save to config.json next to executable so it remembers for future double-clicks!
-                    cfg_save_path = os.path.join(get_base_dir(), "config.json")
-                    try:
-                        with open(cfg_save_path, "w", encoding="utf-8") as f:
-                            json.dump({
-                                "server_url": config["server_url"],
-                                "host_id": config["host_id"],
-                                "api_token": config.get("api_token", "osdbx-default-token")
-                            }, f, indent=2)
-                        print(f"[OK] Configuration saved to {cfg_save_path}\n")
-                    except Exception:
-                        pass
-            except (EOFError, KeyboardInterrupt):
-                pass
 
     write_pid_file()
     agent = OSDBXAgent(config)
