@@ -145,7 +145,7 @@ async def require_device_credential(
         )
     from app.config.settings import settings
     if settings.event_storage.strip().lower() == "memory":
-        return DeviceCredential(device_id="dev-device-01", workspace_id=1)
+        return DeviceCredential(device_id=token, workspace_id=1)
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     try:
         connection = get_connection()

@@ -44,6 +44,7 @@ DEFAULT_CONFIG = {
     "watch_paths": ["."],
     "poll_interval_sec": 3.0,
     "max_batch_size": 25,
+    "api_token": "osdbx-default-token",
 }
 
 
@@ -128,6 +129,7 @@ class OSDBXAgent:
                     self._event_queue = self._event_queue[len(batch) :]
 
             if batch:
+                sent_count = 0
                 for index, ev in enumerate(batch):
                     endpoint = (
                         "/api/os-events/filesystem"
@@ -142,6 +144,9 @@ class OSDBXAgent:
                             self._event_queue = batch[index:] + self._event_queue
                         time.sleep(1.0)
                         break
+                    sent_count += 1
+                if sent_count > 0:
+                    logging.info("Streamed %d forensic event(s) to %s", sent_count, self.server_url)
 
             time.sleep(0.5)
 
@@ -387,6 +392,8 @@ def main():
     parser = argparse.ArgumentParser(description="OS-DBX Endpoint Forensic Collector")
     parser.add_argument("--server", "-s", help="OS-DBX Server API URL (e.g. http://127.0.0.1:8000)")
     parser.add_argument("--host-id", help="Custom Host Identifier")
+    parser.add_argument("--token", "-t", help="Device Bearer Token")
+    parser.add_argument("--watch-path", "-w", help="Path to monitor for filesystem mutations (default: current directory)")
     args = parser.parse_args()
 
     config = load_config()
@@ -394,6 +401,10 @@ def main():
         config["server_url"] = args.server
     if args.host_id:
         config["host_id"] = args.host_id
+    if args.token:
+        config["api_token"] = args.token
+    if args.watch_path:
+        config["watch_paths"] = [args.watch_path]
 
     write_pid_file()
     agent = OSDBXAgent(config)
