@@ -106,6 +106,23 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     import asyncio
     from app.config.database import get_connection
 
+    try:
+        loop = asyncio.get_running_loop()
+        default_handler = loop.get_exception_handler()
+
+        def _ignore_winerror_10054(loop, context):
+            exc = context.get("exception")
+            if isinstance(exc, ConnectionResetError) or getattr(exc, "winerror", None) == 10054:
+                return
+            if default_handler:
+                default_handler(loop, context)
+            else:
+                loop.default_exception_handler(context)
+
+        loop.set_exception_handler(_ignore_winerror_10054)
+    except Exception:
+        pass
+
     seed_admin_account()
     try:
         import threading as _threading
