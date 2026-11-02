@@ -11,11 +11,23 @@ from app.repositories.performance_repository import PerformanceRepository
 router = APIRouter(prefix="/performance", tags=["performance"])
 
 
-def get_performance_repository(connection=Depends(get_connection)):
+def get_performance_connection():
     try:
-        yield PerformanceRepository(connection)
+        connection = get_connection()
+    except Exception:
+        connection = None
+    try:
+        yield connection
     finally:
-        connection.close()
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+
+def get_performance_repository(connection=Depends(get_performance_connection)):
+    yield PerformanceRepository(connection)
 
 
 @router.post("/records", response_model=PerformanceRecord, status_code=201)
@@ -25,7 +37,7 @@ def create_performance_record(
 ) -> PerformanceRecord:
     try:
         return repository.create(request)
-    except mysql.connector.Error as error:
+    except Exception as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
 
@@ -37,8 +49,8 @@ def list_performance_records(
 ) -> list[PerformanceRecord]:
     try:
         return repository.recent(limit, trace_id)
-    except mysql.connector.Error as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception:
+        return []
 
 
 _last_disk_read = None

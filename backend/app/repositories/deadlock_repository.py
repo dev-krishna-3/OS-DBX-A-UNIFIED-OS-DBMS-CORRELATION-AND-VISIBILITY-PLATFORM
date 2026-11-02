@@ -10,6 +10,8 @@ class DeadlockRepository:
         self.connection = connection
 
     def active_locks(self) -> list[LockSnapshot]:
+        if not self.connection:
+            return []
         cursor = self.connection.cursor(dictionary=True)
         try:
             cursor.execute(
@@ -186,6 +188,8 @@ class DeadlockRepository:
             cursor.close()
 
     def recent_incidents(self, limit: int = 50) -> list[IncidentRecord]:
+        if not self.connection:
+            return []
         cursor = self.connection.cursor(dictionary=True)
         try:
             cursor.execute(

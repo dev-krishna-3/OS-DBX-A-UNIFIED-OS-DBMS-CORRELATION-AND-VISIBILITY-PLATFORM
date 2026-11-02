@@ -71,6 +71,8 @@ class DBMSObservationRepository:
             cursor.close()
 
     def recent(self, limit: int = 50) -> list[DBMSQueryObservation]:
+        if not self.connection:
+            return []
         cursor = self.connection.cursor(dictionary=True)
         try:
             cursor.execute(

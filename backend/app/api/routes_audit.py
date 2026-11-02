@@ -55,7 +55,26 @@ async def create_audit_log(
                 _memory_audit_logs.pop()
         return {"status": "success", "message": "Audit log recorded"}
 
-    connection = get_connection()
+    try:
+        connection = get_connection()
+    except Exception:
+        connection = None
+
+    if connection is None:
+        with _audit_lock:
+            entry = {
+                "id": _next_audit_id,
+                "user_id": uid_val,
+                "username": uname_val,
+                "action": log_data.action,
+                "details": log_data.details,
+                "timestamp": datetime.now(timezone.utc),
+            }
+            _next_audit_id += 1
+            _memory_audit_logs.insert(0, entry)
+            if len(_memory_audit_logs) > 1000:
+                _memory_audit_logs.pop()
+        return {"status": "success", "message": "Audit log recorded"}
     try:
         cursor = connection.cursor()
         cursor.execute(
@@ -93,7 +112,14 @@ async def get_audit_logs(
         with _audit_lock:
             return [AuditLogOut(**log) for log in _memory_audit_logs[:limit]]
 
-    connection = get_connection()
+    try:
+        connection = get_connection()
+    except Exception:
+        connection = None
+
+    if connection is None:
+        with _audit_lock:
+            return [AuditLogOut(**log) for log in _memory_audit_logs[:limit]]
     try:
         cursor = connection.cursor(dictionary=True)
         cursor.execute(

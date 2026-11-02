@@ -19,11 +19,23 @@ def detect_deadlock(request: DeadlockDetectionRequest) -> DeadlockDetectionResul
     return DeadlockService().detect(request.locks)
 
 
-def get_deadlock_repository(connection=Depends(get_connection)):
+def get_deadlock_connection():
     try:
-        yield DeadlockRepository(connection)
+        connection = get_connection()
+    except Exception:
+        connection = None
+    try:
+        yield connection
     finally:
-        connection.close()
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+
+def get_deadlock_repository(connection=Depends(get_deadlock_connection)):
+    yield DeadlockRepository(connection)
 
 
 @router.post("/detect/live", response_model=DeadlockDetectionResult)

@@ -38,6 +38,8 @@ class PerformanceRepository:
             cursor.close()
 
     def recent(self, limit: int = 50, trace_id: int | None = None) -> list[PerformanceRecord]:
+        if not self.connection:
+            return []
         cursor = self.connection.cursor(dictionary=True)
         try:
             query = """

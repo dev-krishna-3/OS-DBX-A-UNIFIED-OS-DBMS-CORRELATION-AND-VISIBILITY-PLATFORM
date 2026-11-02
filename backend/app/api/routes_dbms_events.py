@@ -146,7 +146,9 @@ def list_dbms_observations(
     limit: int = Query(default=50, ge=1, le=500),
     connection=Depends(get_dbms_connection),
 ) -> list[DBMSQueryObservation]:
+    if connection is None:
+        return []
     try:
         return DBMSObservationRepository(connection).recent(limit)
-    except mysql.connector.Error as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception:
+        return []
