@@ -26,8 +26,14 @@ import urllib.error
 import urllib.request
 import uuid
 
+def get_base_dir() -> str:
+    """Return the executable directory when frozen (PyInstaller) or the script directory."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
 # Setup local file logging
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.log")
+LOG_FILE = os.path.join(get_base_dir(), "agent.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -50,14 +56,17 @@ DEFAULT_CONFIG = {
 
 def load_config() -> dict:
     config = dict(DEFAULT_CONFIG)
-    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-    if os.path.exists(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-                config.update(loaded)
-        except Exception as e:
-            logging.warning("Could not read config.json, using defaults: %s", e)
+    base_dir = get_base_dir()
+    for potential_dir in [base_dir, os.getcwd()]:
+        cfg_path = os.path.join(potential_dir, "config.json")
+        if os.path.exists(cfg_path):
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    config.update(loaded)
+                    break
+            except Exception as e:
+                logging.warning("Could not read config.json, using defaults: %s", e)
 
     # Environment variable overrides
     if os.environ.get("OSDBX_SERVER_URL"):
@@ -374,13 +383,16 @@ class OSDBXAgent:
 
 
 def write_pid_file():
-    pid_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.pid")
-    with open(pid_path, "w", encoding="utf-8") as f:
-        f.write(str(os.getpid()))
+    pid_path = os.path.join(get_base_dir(), "agent.pid")
+    try:
+        with open(pid_path, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
 
 
 def remove_pid_file():
-    pid_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.pid")
+    pid_path = os.path.join(get_base_dir(), "agent.pid")
     if os.path.exists(pid_path):
         try:
             os.remove(pid_path)
@@ -405,6 +417,50 @@ def main():
         config["api_token"] = args.token
     if args.watch_path:
         config["watch_paths"] = [args.watch_path]
+
+    # If running interactively without a CLI server argument and localhost is unreachable, prompt for server
+    if not args.server and config["server_url"] in {"http://127.0.0.1:8000", "http://localhost:8000"}:
+        local_reachable = False
+        try:
+            req = urllib.request.Request("http://127.0.0.1:8000/health", method="GET")
+            with urllib.request.urlopen(req, timeout=0.6) as r:
+                if r.status in (200, 401, 403):
+                    local_reachable = True
+        except Exception:
+            local_reachable = False
+
+        if not local_reachable and sys.stdin and sys.stdin.isatty():
+            print("\n==============================================================")
+            print("  OS-DBX Enterprise Endpoint Forensic Collector")
+            print("==============================================================")
+            print("Local backend was not detected on http://127.0.0.1:8000.")
+            print("To stream metrics from this PC to your main OS-DBX server,")
+            print("enter your server address (e.g. 10.72.84.192:8000 or http://10.72.84.192:8000).\n")
+            try:
+                user_server = input("OS-DBX Server IP:Port [or press Enter for default]: ").strip()
+                if user_server:
+                    if not user_server.startswith("http://") and not user_server.startswith("https://"):
+                        user_server = f"http://{user_server}"
+                    config["server_url"] = user_server.rstrip("/")
+
+                    user_host = input(f"Host ID / PC name [or press Enter for '{config['host_id']}']: ").strip()
+                    if user_host:
+                        config["host_id"] = user_host
+
+                    # Save to config.json next to executable so it remembers for future double-clicks!
+                    cfg_save_path = os.path.join(get_base_dir(), "config.json")
+                    try:
+                        with open(cfg_save_path, "w", encoding="utf-8") as f:
+                            json.dump({
+                                "server_url": config["server_url"],
+                                "host_id": config["host_id"],
+                                "api_token": config.get("api_token", "osdbx-default-token")
+                            }, f, indent=2)
+                        print(f"[OK] Configuration saved to {cfg_save_path}\n")
+                    except Exception:
+                        pass
+            except (EOFError, KeyboardInterrupt):
+                pass
 
     write_pid_file()
     agent = OSDBXAgent(config)
