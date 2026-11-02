@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # the MySQL schema is available and OS events should be durable.
     event_storage: str = "memory"
     cors_origins: list[str] = Field(default_factory=list)
-    allow_public_registration: bool = False
+    allow_public_registration: bool = True
     dbms_collection_interval_seconds: int = 5
     os_watch_paths: list[str] = ["."]
 

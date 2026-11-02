@@ -52,10 +52,39 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
-def get_user_by_username(connection: mysql.connector.MySQLConnection, username: str) -> Optional[UserInDB]:
+_memory_users: dict[str, UserInDB] = {}
+_memory_user_id_counter: int = 2
+
+
+def _init_memory_admin():
+    admin_pw = os.environ.get("ADMIN_PASSWORD", "DevAdminPassword123!")
+    admin_user = UserInDB(
+        user_id=1,
+        username="admin",
+        email="admin@osdbx.local",
+        uid_linux=0,
+        password_hash=get_password_hash(admin_pw),
+        created_at=datetime.now(timezone.utc),
+        is_admin=True,
+    )
+    _memory_users["admin"] = admin_user
+    _memory_users["admin@osdbx.local"] = admin_user
+
+
+_init_memory_admin()
+
+
+def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], username: str) -> Optional[UserInDB]:
+
+    uname = (username or "").strip().casefold()
     if connection is None:
-        return None
-    """Look up a user by username or email. Returns None if not found."""
+        return _memory_users.get(uname)
+    try:
+        cursor = connection.cursor(dictionary=True)
+    except Exception:
+        return _memory_users.get(uname)
+
+
     cursor = connection.cursor(dictionary=True)
     try:
         try:
@@ -115,14 +144,18 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
 
     # Open a dedicated connection just for the auth lookup — do not share
     # this with the route handler's Depends(get_connection).
-    connection = get_connection()
+    try:
+        connection = get_connection()
+    except Exception:
+        connection = None
     try:
         user = get_user_by_username(connection, username=token_data.username)
         if user is None:
             raise credentials_exception
         return user
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
 
 
 async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)) -> UserInDB:

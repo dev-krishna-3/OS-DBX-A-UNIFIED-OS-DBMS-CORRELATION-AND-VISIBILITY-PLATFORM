@@ -131,3 +131,40 @@ def test_workspace_isolation_in_events(client):
         assert events_ws20[0]["pid"] == 2002
     finally:
         app.dependency_overrides.pop(get_event_service, None)
+
+
+def test_registration_and_login_in_memory_mode(client):
+    """Verify that public registration and login work seamlessly in memory mode."""
+    # 1. Register a new user
+    reg_resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "krishna_test",
+            "email": "krishna_test@example.com",
+            "password": "Password123!",
+        },
+    )
+    assert reg_resp.status_code == 201
+    user_data = reg_resp.json()
+    assert user_data["username"] == "krishna_test"
+
+    # 2. Login with the newly registered user
+    login_resp = client.post(
+        "/api/auth/token",
+        data={
+            "username": "krishna_test",
+            "password": "Password123!",
+        },
+    )
+    assert login_resp.status_code == 200
+    token_data = login_resp.json()
+    assert "access_token" in token_data
+    token = token_data["access_token"]
+
+    # 3. Access protected /me route
+    from app.core.auth import get_current_user
+    app.dependency_overrides.pop(get_current_user, None)
+    me_resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_resp.status_code == 200
+    assert me_resp.json()["username"] == "krishna_test"
+

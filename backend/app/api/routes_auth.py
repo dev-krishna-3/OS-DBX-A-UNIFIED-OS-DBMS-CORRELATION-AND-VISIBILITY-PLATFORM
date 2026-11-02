@@ -106,6 +106,28 @@ def register_user(
             )
     
     hashed_password = get_password_hash(user_in.password)
+
+    if connection is None:
+        import app.core.auth as auth_mod
+        from datetime import datetime, timezone
+        user_id = auth_mod._memory_user_id_counter
+        auth_mod._memory_user_id_counter += 1
+        new_user = UserInDB(
+            user_id=user_id,
+            username=user_in.username,
+            email=user_in.email,
+            uid_linux=1000 + user_id,
+            password_hash=hashed_password,
+            created_at=datetime.now(timezone.utc),
+            is_admin=False,
+        )
+        auth_mod._memory_users[user_in.username.casefold()] = new_user
+        if user_in.email:
+            auth_mod._memory_users[user_in.email.casefold()] = new_user
+            background_tasks.add_task(send_signup_notification, user_in.email, user_in.username)
+        out_data = new_user.model_dump()
+        out_data["email_notification_sent"] = bool(user_in.email)
+        return UserOut(**out_data)
     
     try:
         cursor = connection.cursor()
