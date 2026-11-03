@@ -58,15 +58,20 @@ def load_config() -> dict:
     config = dict(DEFAULT_CONFIG)
     base_dir = get_base_dir()
     for potential_dir in [base_dir, os.getcwd()]:
-        cfg_path = os.path.join(potential_dir, "config.json")
-        if os.path.exists(cfg_path):
-            try:
-                with open(cfg_path, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                    config.update(loaded)
-                    break
-            except Exception as e:
-                logging.warning("Could not read config.json, using defaults: %s", e)
+        found = False
+        for fname in ["agent_config.json", "config.json"]:
+            cfg_path = os.path.join(potential_dir, fname)
+            if os.path.exists(cfg_path):
+                try:
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                        config.update(loaded)
+                        found = True
+                        break
+                except Exception as e:
+                    logging.warning("Could not read %s, using defaults: %s", fname, e)
+        if found:
+            break
 
     # Environment variable overrides
     if os.environ.get("OSDBX_SERVER_URL"):
