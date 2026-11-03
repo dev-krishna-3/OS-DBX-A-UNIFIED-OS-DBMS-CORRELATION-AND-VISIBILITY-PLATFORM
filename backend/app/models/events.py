@@ -112,6 +112,23 @@ class OSEvent(BaseModel):
         except (ValueError, AttributeError) as error:
             raise ValueError("event_id must be a UUID") from error
 
+    @field_validator("ppid", mode="before")
+    @classmethod
+    def sanitize_ppid(cls, value: Any) -> int:
+        if value is None:
+            return 0
+        try:
+            return max(0, int(value))
+        except (ValueError, TypeError):
+            return 0
+
+    @field_validator("user", mode="before")
+    @classmethod
+    def sanitize_user(cls, value: Any) -> str:
+        if value is None or not str(value).strip():
+            return "system"
+        return str(value).strip()
+
     @field_validator("user")
     @classmethod
     def user_not_blank(cls, value: str) -> str:

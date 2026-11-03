@@ -122,6 +122,9 @@ class OSDBXAgent:
                 return False
         except urllib.error.HTTPError as he:
             logging.debug("POST %s returned HTTP %d: %s", endpoint, he.code, he.reason)
+            # If server rejected due to client validation (400 or 422), do not retry
+            if he.code in (400, 422):
+                return True
             return False
         except Exception as e:
             now = time.time()
@@ -182,11 +185,14 @@ class OSDBXAgent:
             try:
                 info = p.info
                 pid = info["pid"]
-                if not pid or pid == 0:
+                if not pid or pid <= 0:
                     continue
                 self._known_processes[pid] = info
                 now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                user = info.get("username") or getpass.getuser() or "system"
+                raw_user = (info.get("username") or getpass.getuser() or "system").strip()
+                user = raw_user if raw_user else "system"
+                raw_ppid = info.get("ppid") or 0
+                ppid = max(0, int(raw_ppid))
                 event = {
                     "event_id": str(uuid.uuid4()),
                     "source": "OS",
@@ -194,7 +200,7 @@ class OSDBXAgent:
                     "event_type": "process_created",
                     "operation": "process_baseline",
                     "pid": pid,
-                    "ppid": info.get("ppid") or 0,
+                    "ppid": ppid,
                     "process_name": info.get("name") or "unknown",
                     "user": user,
                     "file_path": info.get("exe"),
@@ -218,12 +224,17 @@ class OSDBXAgent:
                 try:
                     info = p.info
                     pid = info["pid"]
+                    if not pid or pid <= 0:
+                        continue
                     current_pids.add(pid)
 
                     if pid not in self._known_processes:
                         self._known_processes[pid] = info
                         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                        user = info.get("username") or getpass.getuser() or "system"
+                        raw_user = (info.get("username") or getpass.getuser() or "system").strip()
+                        user = raw_user if raw_user else "system"
+                        raw_ppid = info.get("ppid") or 0
+                        ppid = max(0, int(raw_ppid))
                         event = {
                             "event_id": str(uuid.uuid4()),
                             "source": "OS",
@@ -231,7 +242,7 @@ class OSDBXAgent:
                             "event_type": "process_created",
                             "operation": "process_spawn",
                             "pid": pid,
-                            "ppid": info.get("ppid") or 0,
+                            "ppid": ppid,
                             "process_name": info.get("name") or "unknown",
                             "user": user,
                             "file_path": info.get("exe"),
@@ -248,7 +259,13 @@ class OSDBXAgent:
             terminated_pids = set(self._known_processes.keys()) - current_pids
             for t_pid in terminated_pids:
                 old_info = self._known_processes.pop(t_pid, {})
+                if not t_pid or t_pid <= 0:
+                    continue
                 now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                raw_user = (old_info.get("username") or getpass.getuser() or "system").strip()
+                user = raw_user if raw_user else "system"
+                raw_ppid = old_info.get("ppid") or 0
+                ppid = max(0, int(raw_ppid))
                 event = {
                     "event_id": str(uuid.uuid4()),
                     "source": "OS",
@@ -256,9 +273,9 @@ class OSDBXAgent:
                     "event_type": "process_terminated",
                     "operation": "process_exit",
                     "pid": t_pid,
-                    "ppid": old_info.get("ppid") or 0,
+                    "ppid": ppid,
                     "process_name": old_info.get("name") or "unknown",
-                    "user": old_info.get("username") or getpass.getuser() or "system",
+                    "user": user,
                     "file_path": old_info.get("exe"),
                     "host_id": self.host_id,
                     "evidence_completeness": "4/5",
@@ -304,7 +321,7 @@ class OSDBXAgent:
                         "pid": os.getpid(),
                         "ppid": 0,
                         "process_name": "osdbx_agent",
-                        "user": getpass.getuser(),
+                        "user": (getpass.getuser() or "system").strip() or "system",
                         "resource_info": {
                             "cpu_usage": round(my_cpu, 1),
                             "memory_usage": round((my_mem_mb * 1024 * 1024 / (mem.total or 1)) * 100, 1),
@@ -344,7 +361,7 @@ class OSDBXAgent:
                         "pid": p_pid,
                         "ppid": 0,
                         "process_name": p_name,
-                        "user": getpass.getuser(),
+                        "user": (getpass.getuser() or "system").strip() or "system",
                         "resource_info": {
                             "cpu_usage": round(p_cpu, 1),
                             "memory_usage": round((p_mem_mb * 1024 * 1024 / (mem.total or 1)) * 100, 1),

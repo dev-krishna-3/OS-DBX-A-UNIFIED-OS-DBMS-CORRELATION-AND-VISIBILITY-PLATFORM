@@ -15,8 +15,10 @@ adapter block degrades gracefully: the health endpoints still respond, and the
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Depends
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, Depends, Request, HTTPException
+from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from app.api.routes_auth import router as auth_router
 from app.api.routes_workspaces import router as workspaces_router
@@ -558,9 +560,18 @@ app.include_router(console_router, prefix="/api", dependencies=secure)
 app.include_router(demo_router, prefix="/api")
 
 
+_dist_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if (_dist_path / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_dist_path / "assets")), name="frontend_assets")
+
+
 @app.get("/", include_in_schema=False)
-def root() -> dict[str, str]:
-    """Provide direct links for a teammate or evaluator opening the server."""
+def root(request: Request):
+    """Provide direct links for a teammate or evaluator, or serve the web dashboard for browsers."""
+    accept = request.headers.get("accept", "")
+    dist_index = _dist_path / "index.html"
+    if "text/html" in accept and dist_index.is_file():
+        return FileResponse(str(dist_index))
 
     return {
         "service": settings.app_name,
@@ -614,3 +625,16 @@ def health_details() -> dict:
         details["os_adapter_health"] = None
 
     return details
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend_spa(full_path: str):
+    if full_path.startswith("api/") or full_path in {"docs", "redoc", "openapi.json", "health", "health/details"}:
+        raise HTTPException(status_code=404)
+    target = _dist_path / full_path
+    if full_path and target.is_file():
+        return FileResponse(str(target))
+    dist_index = _dist_path / "index.html"
+    if dist_index.is_file():
+        return FileResponse(str(dist_index))
+    raise HTTPException(status_code=404)
