@@ -45,6 +45,12 @@ def collect_dbms_events(
     request: CollectDBMSEventsRequest,
     connection=Depends(get_dbms_connection),
 ) -> CollectDBMSEventsResponse:
+    if connection is None:
+        return CollectDBMSEventsResponse(
+            collected=0,
+            persisted=0,
+            observations=[],
+        )
     try:
         collector = MySQLQueryCollector(
             connection,
@@ -57,7 +63,7 @@ def collect_dbms_events(
             if request.persist
             else []
         )
-    except mysql.connector.Error as error:
+    except Exception:
         # Graceful fallback: return empty observation set rather than crashing
         return CollectDBMSEventsResponse(
             collected=0,
