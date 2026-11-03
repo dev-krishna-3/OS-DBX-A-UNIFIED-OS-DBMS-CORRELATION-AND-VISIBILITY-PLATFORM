@@ -41,6 +41,8 @@ router = APIRouter(prefix="/os-events", tags=["os-events"])
 
 _process_events: list[StoredOSEvent] = []
 _filesystem_events: list[StoredOSFilesystemEvent] = []
+_active_remote_processes: dict[int, dict] = {}
+_latest_resource_samples: dict[int, dict] = {}
 _next_process_id = 1
 _next_filesystem_id = 1
 _store_lock = threading.Lock()
@@ -80,8 +82,41 @@ def ingest_process_event(
         _next_process_id += 1
         _process_events.append(stored)
         # Bounded in-memory cap for development.
-        if len(_process_events) > 1000:
-            _process_events[:] = _process_events[-1000:]
+        if len(_process_events) > 2000:
+            _process_events[:] = _process_events[-2000:]
+
+        pid = event.pid
+        ev_type = str(event.event_type or "")
+        if pid:
+            if ev_type == "process_terminated":
+                _active_remote_processes.pop(pid, None)
+                _latest_resource_samples.pop(pid, None)
+            elif ev_type == "process_created":
+                _active_remote_processes[pid] = {
+                    "pid": pid,
+                    "ppid": event.ppid,
+                    "name": event.process_name or "unknown",
+                    "user": event.user or "unknown",
+                    "file_path": event.file_path,
+                    "host_id": effective_host_id,
+                    "state": "RUNNING",
+                }
+            elif ev_type == "resource_sample" and event.resource_info:
+                info = (
+                    event.resource_info.model_dump()
+                    if hasattr(event.resource_info, "model_dump")
+                    else dict(event.resource_info)
+                )
+                _latest_resource_samples[pid] = {
+                    "pid": pid,
+                    "name": event.process_name or "agent",
+                    "cpu_percent": info.get("cpu_usage", 0.0),
+                    "memory_rss_mb": info.get("memory_used_mb", 0.0),
+                    "memory_percent": info.get("memory_usage", 0.0),
+                    "io_read_bytes": 0,
+                    "io_write_bytes": 0,
+                    "host_id": effective_host_id,
+                }
 
     try:
         from app.services.event_service import event_service
@@ -559,10 +594,13 @@ def _build_resource_snapshot() -> list[dict]:
 
 
 @router.get("/processes", dependencies=[Depends(get_current_user)])
-def list_processes(limit: int = 50) -> list[dict]:
+def list_processes(limit: int = 100) -> list[dict]:
     """Return real-time running process snapshot, prioritizing remote endpoint agent telemetry."""
-    remote_procs = {}
     with _store_lock:
+        if _active_remote_processes:
+            procs = list(_active_remote_processes.values())
+            return sorted(procs, key=lambda x: x["pid"])[:limit]
+        remote_procs = {}
         for ev in _process_events:
             ev_dict = ev.model_dump() if hasattr(ev, "model_dump") else dict(ev)
             pid = ev_dict.get("pid")
@@ -581,9 +619,8 @@ def list_processes(limit: int = 50) -> list[dict]:
                     "host_id": ev_dict.get("host_id"),
                     "state": "RUNNING",
                 }
-    if remote_procs:
-        procs = list(remote_procs.values())
-        return sorted(procs, key=lambda x: x["pid"])[:limit]
+        if remote_procs:
+            return sorted(list(remote_procs.values()), key=lambda x: x["pid"])[:limit]
     try:
         return _cached_snapshot("processes", _build_process_snapshot)[:limit]
     except Exception:
@@ -591,16 +628,21 @@ def list_processes(limit: int = 50) -> list[dict]:
 
 
 @router.get("/resources", dependencies=[Depends(get_current_user)])
-def list_resource_metrics(limit: int = 50) -> list[dict]:
+def list_resource_metrics(limit: int = 100) -> list[dict]:
     """Return real-time per-process resource metrics, prioritizing remote endpoint telemetry."""
-    remote_res = []
     with _store_lock:
+        if _latest_resource_samples:
+            return list(_latest_resource_samples.values())[:limit]
+        remote_res = {}
         for ev in reversed(_process_events):
             ev_dict = ev.model_dump() if hasattr(ev, "model_dump") else dict(ev)
+            pid = ev_dict.get("pid")
+            if not pid or pid in remote_res:
+                continue
             if ev_dict.get("event_type") == "resource_sample" and "resource_info" in ev_dict:
                 info = ev_dict["resource_info"] or {}
-                remote_res.append({
-                    "pid": ev_dict.get("pid", 0),
+                remote_res[pid] = {
+                    "pid": pid,
                     "name": ev_dict.get("process_name", "agent"),
                     "cpu_percent": info.get("cpu_usage", 0.0),
                     "memory_rss_mb": info.get("memory_used_mb", 0.0),
@@ -608,11 +650,11 @@ def list_resource_metrics(limit: int = 50) -> list[dict]:
                     "io_read_bytes": 0,
                     "io_write_bytes": 0,
                     "host_id": ev_dict.get("host_id"),
-                })
+                }
                 if len(remote_res) >= limit:
                     break
-    if remote_res:
-        return remote_res
+        if remote_res:
+            return list(remote_res.values())
     try:
         return _cached_snapshot("resources", _build_resource_snapshot)[:limit]
     except Exception:

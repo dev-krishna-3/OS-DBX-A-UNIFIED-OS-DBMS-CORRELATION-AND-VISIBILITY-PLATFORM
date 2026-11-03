@@ -1779,34 +1779,77 @@ function OSActivity({ events: eventRows, liveData, sampleMode, search, onRefresh
 
 function ProcessView({ liveData, sampleMode }: { liveData: LiveWorkspaceData; sampleMode: boolean }) {
   const sys = liveData.systemHealth?.system;
-  const rows: string[][] = !sampleMode && liveData.resources.length > 0
-    ? liveData.resources.slice(0, 12).map((r) => [
-        String(r.name ?? 'process'),
-        String(r.pid ?? '0'),
-        'Running',
-        `${Number(r.cpu_percent ?? 0).toFixed(1)}%`,
-        `${Number(r.memory_rss_mb ?? 0).toFixed(1)} MB`,
-        `${((Number(r.io_read_bytes ?? 0) + Number(r.io_write_bytes ?? 0)) / (1024 * 1024)).toFixed(1)} MB`,
-        String(r.num_threads ?? '4'),
-      ])
-    : !sampleMode && liveData.processes.length > 0
-    ? liveData.processes.slice(0, 12).map((p) => [
-        String(p.name ?? 'process'),
-        String(p.pid ?? '0'),
-        String(p.state ?? 'RUNNING'),
-        '0.5%',
-        '48 MB',
-        '0.2 MB/s',
-        '6',
-      ])
-    : [
-        ['checkout-api', '4211', 'Running', '4.8%', '186 MB', '12.4 MB/s', '18'],
-        ['catalog-worker', '3980', 'Running', '2.1%', '312 MB', '8.2 MB/s', '12'],
-        ['mysql-server', '912', 'Running', '9.6%', '1.8 GB', '24.1 MB/s', '42'],
-        ['payment-api', '4278', 'Sleeping', '0.6%', '144 MB', '1.1 MB/s', '9'],
-      ];
 
-  return <><div className="stat-inline"><div><span>Running processes</span><strong>{sys?.process_count ?? rows.length}</strong></div><div><span>Average cpu</span><strong>{sys?.cpu_percent !== undefined ? `${sys.cpu_percent}%` : '18.6%'}</strong></div><div><span>Memory used</span><strong>{sys?.memory_used_mb !== undefined ? `${(sys.memory_used_mb / 1024).toFixed(1)} GB` : '6.2 GB'}</strong></div><div><span>Resource samples</span><strong>{liveData.resources.length || 308}</strong></div><div className="inline-status"><span>{liveData.connected && !sampleMode ? 'Live host process snapshot' : 'Illustrative process snapshot'}</span></div></div>
+  const resMap = useMemo(() => {
+    const map = new Map<number, any>();
+    for (const r of liveData.resources) {
+      if (r.pid !== undefined && r.pid !== null) {
+        map.set(Number(r.pid), r);
+      }
+    }
+    return map;
+  }, [liveData.resources]);
+
+  const rows: string[][] = useMemo(() => {
+    if (!sampleMode && liveData.processes.length > 0) {
+      const seenPids = new Set<string>();
+      const result: string[][] = [];
+      for (const p of liveData.processes) {
+        const pidStr = String(p.pid ?? '0');
+        if (seenPids.has(pidStr)) continue;
+        seenPids.add(pidStr);
+        const pidNum = Number(p.pid ?? 0);
+        const res = resMap.get(pidNum);
+        const cpuStr = res?.cpu_percent !== undefined ? `${Number(res.cpu_percent).toFixed(1)}%` : '0.1%';
+        const memStr = res?.memory_rss_mb !== undefined
+          ? `${Number(res.memory_rss_mb).toFixed(1)} MB`
+          : '48.0 MB';
+        const ioStr = res ? `${((Number(res.io_read_bytes ?? 0) + Number(res.io_write_bytes ?? 0)) / (1024 * 1024)).toFixed(1)} MB` : '0.0 MB';
+        const threadsStr = String(res?.num_threads ?? '4');
+        result.push([
+          String(p.name ?? 'process'),
+          pidStr,
+          String(p.state ?? 'Running'),
+          cpuStr,
+          memStr,
+          ioStr,
+          threadsStr,
+        ]);
+        if (result.length >= 50) break;
+      }
+      if (result.length > 0) return result;
+    }
+
+    if (!sampleMode && liveData.resources.length > 0) {
+      const seenPids = new Set<string>();
+      const deduped: string[][] = [];
+      for (const r of liveData.resources) {
+        const pidStr = String(r.pid ?? '0');
+        if (seenPids.has(pidStr)) continue;
+        seenPids.add(pidStr);
+        deduped.push([
+          String(r.name ?? 'process'),
+          pidStr,
+          'Running',
+          `${Number(r.cpu_percent ?? 0).toFixed(1)}%`,
+          `${Number(r.memory_rss_mb ?? 0).toFixed(1)} MB`,
+          `${((Number(r.io_read_bytes ?? 0) + Number(r.io_write_bytes ?? 0)) / (1024 * 1024)).toFixed(1)} MB`,
+          String(r.num_threads ?? '4'),
+        ]);
+        if (deduped.length >= 50) break;
+      }
+      if (deduped.length > 0) return deduped;
+    }
+
+    return [
+      ['checkout-api', '4211', 'Running', '4.8%', '186 MB', '12.4 MB/s', '18'],
+      ['catalog-worker', '3980', 'Running', '2.1%', '312 MB', '8.2 MB/s', '12'],
+      ['mysql-server', '912', 'Running', '9.6%', '1.8 GB', '24.1 MB/s', '42'],
+      ['payment-api', '4278', 'Sleeping', '0.6%', '144 MB', '1.1 MB/s', '9'],
+    ];
+  }, [sampleMode, liveData.processes, liveData.resources, resMap]);
+
+  return <><div className="stat-inline"><div><span>Running processes</span><strong>{sys?.process_count ?? (liveData.processes.length > 0 ? liveData.processes.length : rows.length)}</strong></div><div><span>Average cpu</span><strong>{sys?.cpu_percent !== undefined ? `${sys.cpu_percent}%` : '18.6%'}</strong></div><div><span>Memory used</span><strong>{sys?.memory_used_mb !== undefined ? `${(sys.memory_used_mb / 1024).toFixed(1)} GB` : '6.2 GB'}</strong></div><div><span>Resource samples</span><strong>{liveData.resources.length || 308}</strong></div><div className="inline-status"><span>{liveData.connected && !sampleMode ? 'Live host process snapshot' : 'Illustrative process snapshot'}</span></div></div>
     <section className="surface-panel table-panel"><div className="panel-heading"><div><h3>Process table</h3><p>Process and resource telemetry</p></div></div><div className="table-wrap"><table><thead><tr><th>Process</th><th>Process ID</th><th>State</th><th>cpu use</th><th>Memory</th><th>Disk I/O</th><th>Threads</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row[0]}-${row[1]}`}><td><span className="process-cell"><span className="process-dot" />{row[0]}</span></td>{row.slice(1).map((value, index) => <td key={index}>{index === 1 ? <span className="state-label state-observed">{value}</span> : value}</td>)}</tr>)}</tbody></table></div></section>
     <section className="resource-strip"><div><Cpu size={16} /><span>cpu utilization</span><strong>{sys?.cpu_percent !== undefined ? `${sys.cpu_percent}%` : '18.6%'}</strong></div><div><MemoryStick size={16} /><span>Memory use</span><strong>{sys?.memory_used_mb !== undefined ? `${sys.memory_used_mb} MB` : '6.2 GB'}</strong></div><div><HardDrive size={16} /><span>Disk throughput</span><strong>{sys?.disk_io_mbs !== undefined ? `${sys.disk_io_mbs} MB/s` : '46.7 MB/s'}</strong></div><div><Activity size={16} /><span>Capture rate</span><strong>{sys?.os_event_rate_per_sec !== undefined ? `${sys.os_event_rate_per_sec} ev/s` : 'Live'}</strong></div></section>
   </>;

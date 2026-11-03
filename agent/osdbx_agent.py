@@ -176,15 +176,39 @@ class OSDBXAgent:
             logging.error("psutil is required. Run 'pip install psutil'.")
             return
 
-        # Initial baseline snapshot
+        # Initial baseline snapshot: cache and stream active processes
+        baseline_events = []
         for p in psutil.process_iter(["pid", "ppid", "name", "username", "exe"]):
             try:
                 info = p.info
-                self._known_processes[info["pid"]] = info
+                pid = info["pid"]
+                if not pid or pid == 0:
+                    continue
+                self._known_processes[pid] = info
+                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                user = info.get("username") or getpass.getuser() or "system"
+                event = {
+                    "event_id": str(uuid.uuid4()),
+                    "source": "OS",
+                    "timestamp": now_iso,
+                    "event_type": "process_created",
+                    "operation": "process_baseline",
+                    "pid": pid,
+                    "ppid": info.get("ppid") or 0,
+                    "process_name": info.get("name") or "unknown",
+                    "user": user,
+                    "file_path": info.get("exe"),
+                    "host_id": self.host_id,
+                    "evidence_completeness": "5/5",
+                    "is_filesystem": False,
+                }
+                baseline_events.append(event)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
         logging.info("Baseline process snapshot: %d active processes.", len(self._known_processes))
+        for ev in baseline_events:
+            self.enqueue_event(ev)
 
         while not self._stop_event.is_set():
             time.sleep(self.poll_interval)
@@ -244,11 +268,18 @@ class OSDBXAgent:
                 logging.debug("Terminated process: %s (PID: %d)", old_info.get("name"), t_pid)
 
     def _monitor_resources(self):
-        """Collect host system resource metrics."""
+        """Collect host system resource metrics and top active processes."""
         try:
             import psutil
         except ImportError:
             return
+
+        # Prime psutil cpu measurement
+        for p in psutil.process_iter():
+            try:
+                p.cpu_percent(interval=None)
+            except Exception:
+                continue
 
         while not self._stop_event.is_set():
             time.sleep(self.poll_interval * 2)
@@ -258,27 +289,73 @@ class OSDBXAgent:
                 net = psutil.net_io_counters()
 
                 now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                event = {
-                    "event_id": str(uuid.uuid4()),
-                    "source": "OS",
-                    "timestamp": now_iso,
-                    "event_type": "resource_sample",
-                    "operation": "host_metrics",
-                    "pid": os.getpid(),
-                    "ppid": 0,
-                    "process_name": "osdbx_agent",
-                    "user": getpass.getuser(),
-                    "resource_info": {
-                        "cpu_usage": cpu,
-                        "memory_usage": mem.percent,
-                        "memory_used_mb": round(mem.used / (1024 * 1024), 2),
-                        "network_io": round((net.bytes_sent + net.bytes_recv) / 1024, 2),
-                    },
-                    "host_id": self.host_id,
-                    "evidence_completeness": "5/5",
-                    "is_filesystem": False,
-                }
-                self.enqueue_event(event)
+
+                # 1. Sample agent itself with true process RSS memory
+                try:
+                    my_proc = psutil.Process()
+                    my_mem_mb = my_proc.memory_info().rss / (1024 * 1024)
+                    my_cpu = my_proc.cpu_percent(interval=None)
+                    agent_event = {
+                        "event_id": str(uuid.uuid4()),
+                        "source": "OS",
+                        "timestamp": now_iso,
+                        "event_type": "resource_sample",
+                        "operation": "host_metrics",
+                        "pid": os.getpid(),
+                        "ppid": 0,
+                        "process_name": "osdbx_agent",
+                        "user": getpass.getuser(),
+                        "resource_info": {
+                            "cpu_usage": round(my_cpu, 1),
+                            "memory_usage": round((my_mem_mb * 1024 * 1024 / (mem.total or 1)) * 100, 1),
+                            "memory_used_mb": round(my_mem_mb, 1),
+                            "network_io": round((net.bytes_sent + net.bytes_recv) / 1024, 2),
+                        },
+                        "host_id": self.host_id,
+                        "evidence_completeness": "5/5",
+                        "is_filesystem": False,
+                    }
+                    self.enqueue_event(agent_event)
+                except Exception:
+                    pass
+
+                # 2. Sample top active processes by CPU and memory
+                active_procs = []
+                for p in psutil.process_iter(["pid", "name"]):
+                    try:
+                        pid = p.info["pid"]
+                        if pid == 0 or pid == os.getpid():
+                            continue
+                        p_cpu = p.cpu_percent(interval=None)
+                        p_mem = p.memory_info().rss / (1024 * 1024)
+                        if p_cpu > 0.0 or p_mem > 30.0:
+                            active_procs.append((p_cpu, p_mem, pid, p.info.get("name") or "unknown"))
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+
+                active_procs.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                for p_cpu, p_mem_mb, p_pid, p_name in active_procs[:12]:
+                    sample_event = {
+                        "event_id": str(uuid.uuid4()),
+                        "source": "OS",
+                        "timestamp": now_iso,
+                        "event_type": "resource_sample",
+                        "operation": "process_resource_sample",
+                        "pid": p_pid,
+                        "ppid": 0,
+                        "process_name": p_name,
+                        "user": getpass.getuser(),
+                        "resource_info": {
+                            "cpu_usage": round(p_cpu, 1),
+                            "memory_usage": round((p_mem_mb * 1024 * 1024 / (mem.total or 1)) * 100, 1),
+                            "memory_used_mb": round(p_mem_mb, 1),
+                            "network_io": 0.0,
+                        },
+                        "host_id": self.host_id,
+                        "evidence_completeness": "5/5",
+                        "is_filesystem": False,
+                    }
+                    self.enqueue_event(sample_event)
             except Exception as e:
                 logging.debug("Resource sampling error: %s", e)
 
