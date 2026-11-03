@@ -70,9 +70,10 @@ def ingest_process_event(
     """
     global _next_process_id
 
+    effective_host_id = event.host_id or credential.device_id
     with _store_lock:
         stored = StoredOSEvent(
-            **{**event.model_dump(), "host_id": credential.device_id},
+            **{**event.model_dump(), "host_id": effective_host_id},
             id=_next_process_id,
             received_at=datetime.now(timezone.utc),
         )
@@ -81,6 +82,12 @@ def ingest_process_event(
         # Bounded in-memory cap for development.
         if len(_process_events) > 1000:
             _process_events[:] = _process_events[-1000:]
+
+    try:
+        from app.services.event_service import event_service
+        event_service.ingest_event(event, workspace_id=getattr(credential, "workspace_id", 1))
+    except Exception:
+        pass
 
     if settings.event_storage.strip().lower() == "memory":
         return stored
@@ -164,9 +171,10 @@ def ingest_filesystem_event(
     """
     global _next_filesystem_id
 
+    effective_host_id = event.host_id or credential.device_id
     with _store_lock:
         stored = StoredOSFilesystemEvent(
-            **{**event.model_dump(), "host_id": credential.device_id},
+            **{**event.model_dump(), "host_id": effective_host_id},
             id=_next_filesystem_id,
             received_at=datetime.now(timezone.utc),
         )
@@ -552,7 +560,30 @@ def _build_resource_snapshot() -> list[dict]:
 
 @router.get("/processes", dependencies=[Depends(get_current_user)])
 def list_processes(limit: int = 50) -> list[dict]:
-    """Return real-time running process snapshot using Person 1's collector."""
+    """Return real-time running process snapshot, prioritizing remote endpoint agent telemetry."""
+    remote_procs = {}
+    with _store_lock:
+        for ev in _process_events:
+            ev_dict = ev.model_dump() if hasattr(ev, "model_dump") else dict(ev)
+            pid = ev_dict.get("pid")
+            if not pid:
+                continue
+            ev_type = str(ev_dict.get("event_type") or "")
+            if ev_type == "process_terminated":
+                remote_procs.pop(pid, None)
+            elif ev_type == "process_created":
+                remote_procs[pid] = {
+                    "pid": pid,
+                    "ppid": ev_dict.get("ppid"),
+                    "name": ev_dict.get("process_name") or ev_dict.get("name") or "unknown",
+                    "user": ev_dict.get("user") or "unknown",
+                    "file_path": ev_dict.get("file_path"),
+                    "host_id": ev_dict.get("host_id"),
+                    "state": "RUNNING",
+                }
+    if remote_procs:
+        procs = list(remote_procs.values())
+        return sorted(procs, key=lambda x: x["pid"])[:limit]
     try:
         return _cached_snapshot("processes", _build_process_snapshot)[:limit]
     except Exception:
@@ -561,7 +592,27 @@ def list_processes(limit: int = 50) -> list[dict]:
 
 @router.get("/resources", dependencies=[Depends(get_current_user)])
 def list_resource_metrics(limit: int = 50) -> list[dict]:
-    """Return real-time per-process resource metrics using Person 1's collector."""
+    """Return real-time per-process resource metrics, prioritizing remote endpoint telemetry."""
+    remote_res = []
+    with _store_lock:
+        for ev in reversed(_process_events):
+            ev_dict = ev.model_dump() if hasattr(ev, "model_dump") else dict(ev)
+            if ev_dict.get("event_type") == "resource_sample" and "resource_info" in ev_dict:
+                info = ev_dict["resource_info"] or {}
+                remote_res.append({
+                    "pid": ev_dict.get("pid", 0),
+                    "name": ev_dict.get("process_name", "agent"),
+                    "cpu_percent": info.get("cpu_usage", 0.0),
+                    "memory_rss_mb": info.get("memory_used_mb", 0.0),
+                    "memory_percent": info.get("memory_usage", 0.0),
+                    "io_read_bytes": 0,
+                    "io_write_bytes": 0,
+                    "host_id": ev_dict.get("host_id"),
+                })
+                if len(remote_res) >= limit:
+                    break
+    if remote_res:
+        return remote_res
     try:
         return _cached_snapshot("resources", _build_resource_snapshot)[:limit]
     except Exception:
