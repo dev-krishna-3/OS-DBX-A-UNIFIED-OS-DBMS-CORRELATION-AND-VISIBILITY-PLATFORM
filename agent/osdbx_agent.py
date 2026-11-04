@@ -108,6 +108,8 @@ class OSDBXAgent:
         headers = {
             "Content-Type": "application/json",
             "User-Agent": f"OSDBX-Agent/1.0 ({platform.system()}; {self.host_id})",
+            "Bypass-Tunnel-Reminder": "true",
+            "ngrok-skip-browser-warning": "true",
         }
         if self.config.get("api_token"):
             headers["Authorization"] = f"Bearer {self.config['api_token']}"
