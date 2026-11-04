@@ -84,14 +84,14 @@ def load_config() -> dict:
     if not config.get("host_id"):
         config["host_id"] = socket.gethostname()
 
-    config["server_url"] = config["server_url"].rstrip("/")
+    config["server_url"] = (config.get("server_url") or "http://127.0.0.1:8000").strip().rstrip("/")
     return config
 
 
 class OSDBXAgent:
     def __init__(self, config: dict):
         self.config = config
-        self.server_url = config["server_url"]
+        self.server_url = (config.get("server_url") or "http://127.0.0.1:8000").strip().rstrip("/")
         self.host_id = config["host_id"]
         self.watch_paths = config.get("watch_paths", ["."])
         self.poll_interval = float(config.get("poll_interval_sec", 3.0))
@@ -566,7 +566,7 @@ def main():
             if entered:
                 config["server_url"] = normalize_server_url(entered)
             else:
-                config["server_url"] = saved_server
+                config["server_url"] = normalize_server_url(saved_server)
 
             default_host = config.get("host_id") or socket.gethostname()
             entered_host = input(f"Host / PC Name       [Press Enter for '{default_host}']: ").strip()

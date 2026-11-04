@@ -1,0 +1,9 @@
+{
+  "server_url": "https://fortune-sea-increases-hampshire.trycloudflare.com",
+  "host_id": "friend-laptop",
+  "api_token": "dev-device-token",
+  "poll_interval_sec": 1.0,
+  "watch_paths": [
+    "."
+  ]
+}
