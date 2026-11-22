@@ -127,6 +127,11 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
 
+    if settings.auto_init_schema and settings.event_storage.strip().lower() == "mysql":
+        from app.services.schema_bootstrap import init_schema_if_needed
+
+        init_schema_if_needed()
+
     seed_admin_account()
     try:
         import threading as _threading

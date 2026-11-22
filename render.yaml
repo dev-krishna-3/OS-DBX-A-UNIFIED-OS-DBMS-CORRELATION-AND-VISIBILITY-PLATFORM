@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: osdbx-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile.backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: EVENT_STORAGE
+        value: mysql
+      - key: AUTO_INIT_SCHEMA
+        value: "true"
+      - key: ALLOW_PUBLIC_REGISTRATION
+        value: "true"
+      - key: MYSQL_CONNECT_TIMEOUT
+        value: "10"
+      - key: MYSQL_SSL_REQUIRED
+        value: "true"
+      - key: MYSQL_HOST
+        sync: false
+      - key: MYSQL_PORT
+        sync: false
+      - key: MYSQL_USER
+        sync: false
+      - key: MYSQL_PASSWORD
+        sync: false
+      - key: MYSQL_DATABASE
+        sync: false
+      - key: MYSQL_SSL_CA_PEM
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false

@@ -112,7 +112,7 @@ def run_sql_causality(request: SqlConsoleRequest) -> dict:
 
     import mysql.connector
 
-    from app.config.database import get_connection
+    from app.config.database import get_connection, get_mysql_connect_kwargs
     from app.config.settings import settings
 
     pid = os.getpid()
@@ -126,13 +126,7 @@ def run_sql_causality(request: SqlConsoleRequest) -> dict:
     conn_id: int | None = None
 
     try:
-        conn = mysql.connector.connect(
-            host=settings.mysql_host,
-            port=settings.mysql_port,
-            user=settings.mysql_user,
-            password=settings.mysql_password,
-            database=settings.mysql_database,
-        )
+        conn = mysql.connector.connect(**get_mysql_connect_kwargs())
     except mysql.connector.Error as error:
         raise HTTPException(status_code=503, detail=f"Database is unavailable: {error.msg}") from error
 
