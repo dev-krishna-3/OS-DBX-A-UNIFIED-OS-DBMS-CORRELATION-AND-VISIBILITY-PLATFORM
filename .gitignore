@@ -54,3 +54,6 @@ os_monitor/watched_folder/
 .hallmark/
 .impeccable/
 .impeccable-cache/
+
+*.pid
+*.lnk
