@@ -98,6 +98,7 @@ class EventRepository:
                         event_type=str(row["event_type"]),
                         file_path=row.get("file_path"),
                         workspace_id=row.get("workspace_id"),
+                        host_id=str(metadata.get("host_id") or "localhost"),
                         id=int(row["event_id"]),
                         received_at=row["timestamp"],
                     )

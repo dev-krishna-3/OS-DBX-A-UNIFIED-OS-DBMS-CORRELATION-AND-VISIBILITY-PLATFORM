@@ -143,7 +143,7 @@ def ingest_process_event(
                 "ppid": event.ppid,
                 "user": event.user,
                 "process_name": event.process_name,
-                "host_id": credential.device_id,
+                "host_id": effective_host_id,
                 "metadata": event.metadata or {},
             })
             cur.execute(
@@ -236,7 +236,7 @@ def ingest_filesystem_event(
             ev_type = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
             details = json.dumps({
                 "event_id": event.event_id,
-                "host_id": credential.device_id,
+                "host_id": effective_host_id,
                 "operation": event.operation,
                 "metadata": event.metadata or {},
             })
