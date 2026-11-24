@@ -14,6 +14,8 @@ export interface AuthUser {
 export interface AuthResult {
   access_token: string;
   token_type: 'bearer';
+  requires_totp?: boolean;
+  challenge_token?: string;
   email_notification_sent: boolean;
 }
 
@@ -56,7 +58,20 @@ export const authApi = {
       body,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
-    setAccessToken(result.access_token);
+    if (result.access_token && !result.requires_totp) {
+      setAccessToken(result.access_token);
+    }
+    return result;
+  },
+
+  async verifyTotpLogin(challenge_token: string, code: string): Promise<AuthResult> {
+    const result = await postJson<AuthResult>('/auth/totp/verify-login', {
+      challenge_token,
+      code,
+    });
+    if (result.access_token) {
+      setAccessToken(result.access_token);
+    }
     return result;
   },
 

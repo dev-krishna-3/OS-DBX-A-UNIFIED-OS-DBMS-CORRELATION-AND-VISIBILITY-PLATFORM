@@ -102,7 +102,8 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
             cursor.execute(
                 "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
                 "COALESCE(email_verified, 0) as email_verified, "
-                "COALESCE(totp_enabled, 0) as totp_enabled "
+                "COALESCE(totp_enabled, 0) as totp_enabled, "
+                "totp_secret "
                 "FROM users WHERE username = %s OR email = %s LIMIT 1",
                 (username, username)
             )
@@ -110,18 +111,28 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
         except Exception:
             try:
                 cursor.execute(
-                    "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin "
+                    "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
+                    "COALESCE(email_verified, 0) as email_verified, "
+                    "COALESCE(totp_enabled, 0) as totp_enabled "
                     "FROM users WHERE username = %s OR email = %s LIMIT 1",
                     (username, username)
                 )
                 user_dict = cursor.fetchone()
             except Exception:
-                cursor.execute(
-                    "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin "
-                    "FROM users WHERE username = %s LIMIT 1",
-                    (username,)
-                )
-                user_dict = cursor.fetchone()
+                try:
+                    cursor.execute(
+                        "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin "
+                        "FROM users WHERE username = %s OR email = %s LIMIT 1",
+                        (username, username)
+                    )
+                    user_dict = cursor.fetchone()
+                except Exception:
+                    cursor.execute(
+                        "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin "
+                        "FROM users WHERE username = %s LIMIT 1",
+                        (username,)
+                    )
+                    user_dict = cursor.fetchone()
     except Exception:
         user_dict = None
     finally:
@@ -142,6 +153,7 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
         else:
             user_dict["email_verified"] = bool(user_dict.get("email_verified", False))
         user_dict["totp_enabled"] = bool(user_dict.get("totp_enabled", False))
+        user_dict["totp_secret"] = user_dict.get("totp_secret")
 
         return UserInDB(**user_dict)
     return _memory_users.get(uname)

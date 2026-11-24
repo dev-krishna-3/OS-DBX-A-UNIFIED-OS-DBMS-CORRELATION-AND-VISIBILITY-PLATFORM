@@ -39,6 +39,7 @@ class UserInDB(UserBase):
     uid_linux: int = 1000
     password_hash: str
     created_at: datetime
+    totp_secret: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class UserOut(UserBase):
@@ -49,8 +50,10 @@ class UserOut(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
-    access_token: str
-    token_type: str
+    access_token: str = ""
+    token_type: str = "bearer"
+    requires_totp: bool = False
+    challenge_token: Optional[str] = None
     email_notification_sent: bool = Field(default=False, description="Whether an email notification was sent")
 
 class TokenData(BaseModel):
@@ -126,6 +129,11 @@ class TotpSetupResponse(BaseModel):
 
 
 class TotpVerifyRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=6, description="6-digit authenticator code")
+
+
+class TotpLoginVerifyRequest(BaseModel):
+    challenge_token: str
     code: str = Field(min_length=6, max_length=6, description="6-digit authenticator code")
 
 

@@ -76,11 +76,48 @@ def test_totp_endpoints_lifecycle():
     status_after = client.get("/api/auth/totp/status", headers=headers)
     assert status_after.json()["totp_enabled"] is True
 
-    # 6. Disable TOTP
+    # 6. Test Login Challenge Flow when TOTP is enabled
+    # 6a. Normal login now triggers 2FA challenge
+    login_resp = client.post("/api/auth/token", data={"username": "admin", "password": "DevAdminPassword123!"})
+    assert login_resp.status_code == 200
+    challenge_data = login_resp.json()
+    assert challenge_data.get("requires_totp") is True
+    assert challenge_data.get("challenge_token") is not None
+    challenge_token = challenge_data["challenge_token"]
+
+    # 6b. Verify with invalid code -> 400
+    bad_verify = client.post("/api/auth/totp/verify-login", json={"challenge_token": challenge_token, "code": "000000"})
+    assert bad_verify.status_code == 400
+
+    # 6c. Verify with valid code -> 200 and access_token issued
+    now_counter = int(time.time()) // 30
+    counter_bytes = struct.pack(">Q", now_counter)
+    h = hmac.new(key, counter_bytes, hashlib.sha1).digest()
+    h_offset = h[-1] & 0x0F
+    challenge_code = f"{(struct.unpack('>I', h[h_offset:h_offset + 4])[0] & 0x7FFFFFFF) % 1000000:06d}"
+
+    good_verify = client.post("/api/auth/totp/verify-login", json={"challenge_token": challenge_token, "code": challenge_code})
+    assert good_verify.status_code == 200
+    new_token_data = good_verify.json()
+    assert new_token_data["access_token"]
+    assert new_token_data["token_type"] == "bearer"
+
+    # 6d. Check that access token works on authenticated endpoint
+    me_resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {new_token_data['access_token']}"})
+    assert me_resp.status_code == 200
+    assert me_resp.json()["username"] == "admin"
+
+    # 7. Disable TOTP
     disable_resp = client.post("/api/auth/totp/disable", headers=headers)
     assert disable_resp.status_code == 200
     assert disable_resp.json()["totp_enabled"] is False
 
-    # 7. Final status
+    # 8. Final status
     status_final = client.get("/api/auth/totp/status", headers=headers)
     assert status_final.json()["totp_enabled"] is False
+
+    # 9. Verify login returns direct access token again (no 2FA challenge)
+    direct_login = client.post("/api/auth/token", data={"username": "admin", "password": "DevAdminPassword123!"})
+    assert direct_login.status_code == 200
+    assert direct_login.json().get("requires_totp") is False
+    assert direct_login.json().get("access_token") != ""

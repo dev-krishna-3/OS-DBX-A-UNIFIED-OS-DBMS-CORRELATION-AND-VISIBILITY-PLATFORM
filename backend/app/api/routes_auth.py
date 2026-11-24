@@ -11,6 +11,7 @@ import hmac
 import hashlib
 import struct
 import urllib.parse
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.security import OAuth2PasswordRequestForm
 import mysql.connector
@@ -18,6 +19,8 @@ import mysql.connector
 from app.config.database import get_connection
 from app.core.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    SECRET_KEY,
+    ALGORITHM,
     create_access_token,
     get_password_hash,
     get_user_by_username,
@@ -37,6 +40,7 @@ from app.models.users import (
     VerifyEmailConfirmRequest,
     TotpSetupResponse,
     TotpVerifyRequest,
+    TotpLoginVerifyRequest,
     TotpStatusResponse,
 )
 from app.config.settings import settings
@@ -683,7 +687,22 @@ def login_access_token(
             detail="Incorrect username/email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
+    # Check if Two-Step Verification (Google Authenticator) is enabled for this user
+    if user.totp_enabled:
+        clear_rate_limit(keys)
+        challenge_token = create_access_token(
+            data={"sub": user.username, "purpose": "totp_challenge"},
+            expires_delta=timedelta(minutes=5),
+        )
+        return {
+            "access_token": "",
+            "token_type": "bearer",
+            "requires_totp": True,
+            "challenge_token": challenge_token,
+            "email_notification_sent": False,
+        }
+
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
@@ -695,6 +714,8 @@ def login_access_token(
     return {
         "access_token": access_token,
         "token_type": "bearer",
+        "requires_totp": False,
+        "challenge_token": None,
         "email_notification_sent": bool(recipient_email),
     }
 
@@ -894,11 +915,13 @@ def enable_totp_endpoint(
 
     _memory_totp_secrets[current_user.user_id] = secret
     current_user.totp_enabled = True
+    current_user.totp_secret = secret
     try:
         from app.core.auth import _memory_users
         uname = current_user.username.casefold()
         if uname in _memory_users:
             _memory_users[uname].totp_enabled = True
+            _memory_users[uname].totp_secret = secret
     except Exception:
         pass
 
@@ -920,6 +943,82 @@ def enable_totp_endpoint(
     )
 
 
+@router.post("/totp/verify-login", response_model=Token)
+def verify_totp_login_endpoint(
+    req: TotpLoginVerifyRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    connection: Optional[mysql.connector.MySQLConnection] = Depends(get_dbms_connection),
+) -> Any:
+    """Validate 6-digit Google Authenticator code during login challenge and issue access token."""
+    client_host = request.client.host if request.client else "unknown"
+    rate_key = (f"totp-login:{client_host}",)
+    check_rate_limit(rate_key, max_attempts=10, window_seconds=60, detail="Too many invalid 2FA attempts. Please wait a minute and try again.")
+
+    try:
+        payload = jwt.decode(req.challenge_token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        purpose: str = payload.get("purpose")
+        if not username or purpose != "totp_challenge":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid two-step challenge session. Please sign in again.",
+            )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Two-step verification session expired or invalid. Please sign in again.",
+        )
+
+    user = get_user_by_username(connection, username=username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    secret = user.totp_secret or _memory_totp_secrets.get(user.user_id)
+    if not secret and connection is not None:
+        try:
+            cur = connection.cursor(dictionary=True)
+            cur.execute("SELECT totp_secret FROM users WHERE user_id = %s", (user.user_id,))
+            row = cur.fetchone()
+            if row and row.get("totp_secret"):
+                secret = row["totp_secret"]
+            cur.close()
+        except Exception:
+            pass
+
+    if not secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Two-step verification secret is missing. Please contact administrator to reset your credentials.",
+        )
+
+    if not _verify_totp_code(secret, req.code):
+        record_rate_limited_attempt(rate_key, window_seconds=60)
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid 6-digit authenticator code. Please check your Google Authenticator app and try again.",
+        )
+
+    clear_rate_limit(rate_key)
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+
+    recipient_email = user.email or (username if "@" in username else None)
+    if recipient_email:
+        background_tasks.add_task(send_signin_notification, recipient_email, user.username)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "requires_totp": False,
+        "challenge_token": None,
+        "email_notification_sent": bool(recipient_email),
+    }
+
+
 @router.post("/totp/disable", response_model=TotpStatusResponse)
 def disable_totp_endpoint(
     current_user: UserInDB = Depends(get_current_active_user),
@@ -929,11 +1028,13 @@ def disable_totp_endpoint(
     _memory_totp_secrets.pop(current_user.user_id, None)
     _memory_totp_pending.pop(current_user.user_id, None)
     current_user.totp_enabled = False
+    current_user.totp_secret = None
     try:
         from app.core.auth import _memory_users
         uname = current_user.username.casefold()
         if uname in _memory_users:
             _memory_users[uname].totp_enabled = False
+            _memory_users[uname].totp_secret = None
     except Exception:
         pass
 
