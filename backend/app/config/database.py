@@ -11,7 +11,7 @@ from app.config.settings import settings
 
 _conn_lock = threading.Lock()
 _last_failure_time = 0.0
-_COOLDOWN_SECONDS = 20.0
+_COOLDOWN_SECONDS = 3.0
 _connect_host = "127.0.0.1" if settings.mysql_host.strip().lower() in {"localhost", ""} else settings.mysql_host
 _cached_ssl_ca_path: str | None = None
 
@@ -65,33 +65,33 @@ def get_mysql_connect_kwargs(database: str | None = None) -> dict:
     return kwargs
 
 
-# Create a module-level connection pool
+# Create a module-level connection pool (sized safely for cloud/trial tiers)
 try:
+    _pool_size = max(1, min(int(getattr(settings, "mysql_pool_size", 4)), 5))
     _connection_pool = pooling.MySQLConnectionPool(
         pool_name="osdbx_pool",
-        pool_size=25,
+        pool_size=_pool_size,
         pool_reset_session=True,
         **get_mysql_connect_kwargs(),
     )
 except Exception as err:
-    print(f"Error initializing connection pool: {err}")
+    print(f"Notice: MySQL connection pool not initialized ({err}); using on-demand connections.")
     _connection_pool = None
-    _last_failure_time = time.time()
 
 
 def get_connection():
-    """Get a MySQL connection from the pool, with fast-fail circuit breaker when offline."""
+    """Get a MySQL connection from the pool, with fallback to on-demand and short circuit breaker."""
     global _connection_pool, _last_failure_time
 
     if _connection_pool:
         try:
             return _connection_pool.get_connection()
         except Exception:
-            _connection_pool = None
+            pass
 
     now = time.time()
     with _conn_lock:
-        if now - _last_failure_time < _COOLDOWN_SECONDS:
+        if _last_failure_time > 0 and (now - _last_failure_time) < _COOLDOWN_SECONDS:
             raise mysql.connector.errors.DatabaseError(
                 2003,
                 f"Can't connect to MySQL server on '{_connect_host}:{settings.mysql_port}' (offline cooldown active)",

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     mysql_password: str = ""
     mysql_database: str = "os_dbx"
     mysql_connect_timeout: int = 10
+    mysql_pool_size: int = 4
     mysql_ssl_required: bool = False
     mysql_ssl_ca: str = ""
     mysql_ssl_ca_pem: str = ""
