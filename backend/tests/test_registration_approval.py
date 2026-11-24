@@ -108,13 +108,18 @@ def test_registration_request_and_admin_approval_lifecycle():
         assert user_info["email"] == "mushkan012@example.com"
         assert user_info.get("email_verified") is False
 
-        # 8. User requests email verification code
-        send_code_resp = client.post("/api/auth/verify-email/send", headers={"Authorization": f"Bearer {user_token}"})
-        assert send_code_resp.status_code == 200, send_code_resp.text
-        code_data = send_code_resp.json()
-        assert code_data["success"] is True
-        code = code_data.get("demo_code")
-        assert code is not None, "Demo code should be returned in simulation environment"
+        # 8. User requests email verification code (mock sending so no external network call in unit test)
+        from unittest.mock import patch
+        from app.api.routes_auth import _memory_verification_codes
+        with patch("app.api.routes_auth.send_email_verification_code", return_value=True):
+            send_code_resp = client.post("/api/auth/verify-email/send", headers={"Authorization": f"Bearer {user_token}"})
+            assert send_code_resp.status_code == 200, send_code_resp.text
+            code_data = send_code_resp.json()
+            assert code_data["success"] is True
+
+        user_codes = _memory_verification_codes.get(user_info["user_id"], [])
+        assert len(user_codes) > 0, "Verification code should be recorded in store"
+        code = user_codes[-1]["code"]
 
         # 9. Invalid code should fail
         bad_confirm = client.post("/api/auth/verify-email/confirm", headers={"Authorization": f"Bearer {user_token}"}, json={"code": "000000"})

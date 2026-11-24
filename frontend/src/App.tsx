@@ -5357,7 +5357,6 @@ function AccountProfileModal({
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [code, setCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
-  const [demoCode, setDemoCode] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [statusErr, setStatusErr] = useState('');
 
@@ -5370,13 +5369,10 @@ function AccountProfileModal({
     try {
       const res = await authApi.sendVerificationEmail();
       setCodeSent(true);
-      if (res.demo_code) {
-        setDemoCode(res.demo_code);
-      }
       setStatusMsg(res.message);
       onNotify(res.message);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Could not send verification code.';
+      const msg = err instanceof Error ? err.message : 'Could not send verification code via email.';
       setStatusErr(msg);
     } finally {
       setSendingCode(false);
@@ -5488,36 +5484,27 @@ function AccountProfileModal({
                 </button>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {demoCode && (
-                  <div style={{ padding: '6px 10px', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', fontSize: '12px', color: 'var(--color-primary, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                    <span>💡 <strong>Demo Code:</strong> {demoCode} (Evaluation simulation)</span>
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      style={{ padding: '2px 8px', fontSize: '11px', height: '22px' }}
-                      onClick={() => setCode(demoCode)}
-                    >
-                      Auto-fill
-                    </button>
-                  </div>
-                )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '12px', color: '#059669', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>✉️</span>
+                  <span>A 6-digit verification code was sent to <strong>{user.email}</strong>. Please check your inbox.</span>
+                </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <input
                     type="text"
                     maxLength={6}
-                    placeholder="6-digit code"
+                    placeholder="Enter 6-digit OTP"
                     value={code}
-                    onChange={(e) => setCode(e.target.value)}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                     style={{
-                      padding: '6px 10px',
-                      borderRadius: '6px',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
                       border: '1px solid var(--color-border)',
-                      width: '130px',
-                      letterSpacing: '3px',
-                      fontWeight: 600,
+                      width: '160px',
+                      letterSpacing: '4px',
+                      fontWeight: 700,
                       textAlign: 'center',
-                      fontSize: '13px',
+                      fontSize: '15px',
                     }}
                   />
                   <button
@@ -5525,16 +5512,16 @@ function AccountProfileModal({
                     className="button button-primary"
                     disabled={verifyingCode || code.trim().length !== 6}
                     onClick={handleConfirmCode}
-                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                    style={{ padding: '8px 16px', fontSize: '13px' }}
                   >
-                    {verifyingCode ? 'Verifying...' : 'Confirm'}
+                    {verifyingCode ? 'Verifying...' : 'Verify OTP'}
                   </button>
                   <button
                     type="button"
                     className="button button-secondary"
                     disabled={sendingCode}
                     onClick={handleSendCode}
-                    style={{ padding: '6px 10px', fontSize: '12px' }}
+                    style={{ padding: '8px 12px', fontSize: '12px' }}
                   >
                     Resend Code
                   </button>
@@ -5598,7 +5585,6 @@ function AccountSettings({
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [code, setCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
-  const [demoCode, setDemoCode] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [statusErr, setStatusErr] = useState('');
 
@@ -5611,13 +5597,10 @@ function AccountSettings({
     try {
       const res = await authApi.sendVerificationEmail();
       setCodeSent(true);
-      if (res.demo_code) {
-        setDemoCode(res.demo_code);
-      }
       setStatusMsg(res.message);
       if (onAction) onAction(res.message);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Could not send verification code.';
+      const msg = err instanceof Error ? err.message : 'Could not send verification code via email.';
       setStatusErr(msg);
     } finally {
       setSendingCode(false);
@@ -5705,19 +5688,17 @@ function AccountSettings({
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {demoCode && (
-                <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', fontSize: '12px', color: 'var(--color-primary, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                  <span>💡 <strong>Demo Code:</strong> {demoCode} (Generated for evaluation)</span>
-                  <button type="button" className="button button-secondary" style={{ padding: '2px 8px', fontSize: '11px', height: '22px' }} onClick={() => setCode(demoCode)}>Auto-fill</button>
-                </div>
-              )}
+              <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '12px', color: '#059669', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>✉️</span>
+                <span>A 6-digit verification code was sent to <strong>{user.email}</strong>. Please check your inbox.</span>
+              </div>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <input
                   type="text"
                   maxLength={6}
-                  placeholder="6-digit code"
+                  placeholder="Enter 6-digit OTP"
                   value={code}
-                  onChange={(e) => setCode(e.target.value)}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                   style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--color-border)', width: '150px', letterSpacing: '4px', fontWeight: 600, textAlign: 'center' }}
                 />
                 <button

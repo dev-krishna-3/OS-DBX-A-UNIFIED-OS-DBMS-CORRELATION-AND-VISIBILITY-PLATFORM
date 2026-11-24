@@ -85,7 +85,7 @@ export const authApi = {
     return apiRequest<AuthUser>('/auth/me');
   },
 
-  sendVerificationEmail(): Promise<{ success: boolean; message: string; is_simulation?: boolean; demo_code?: string; email_verified?: boolean }> {
+  sendVerificationEmail(): Promise<{ success: boolean; message: string; email_verified?: boolean }> {
     return postJson('/auth/verify-email/send', {});
   },
 

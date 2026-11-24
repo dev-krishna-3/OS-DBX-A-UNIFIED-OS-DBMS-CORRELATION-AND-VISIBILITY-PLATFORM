@@ -32,7 +32,7 @@ def _send_email(to_email: str, subject: str, text_body: str, html_body: str) -> 
     msg.add_alternative(html_body, subtype="html")
 
     try:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=5) as server:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
             server.ehlo()
             if settings.smtp_use_tls:
                 server.starttls()
@@ -40,7 +40,9 @@ def _send_email(to_email: str, subject: str, text_body: str, html_body: str) -> 
             server.login(settings.smtp_username, settings.smtp_password)
             server.send_message(msg)
         return True
-    except Exception:
+    except Exception as exc:
+        import logging
+        logging.getLogger("os_dbx.email").error(f"Failed to send email to {to_email}: {exc}")
         return False
 
 

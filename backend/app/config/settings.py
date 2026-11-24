@@ -30,11 +30,11 @@ class Settings(BaseSettings):
     os_watch_paths: list[str] = ["."]
 
     # SMTP Email Notification Settings
-    smtp_host: str = ""
+    smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_from_email: str = ""
+    smtp_username: str = "osdbx86@gmail.com"
+    smtp_password: str = "udgtrcqcgiddvxes"
+    smtp_from_email: str = "osdbx86@gmail.com"
     smtp_use_tls: bool = True
 
     model_config = SettingsConfigDict(

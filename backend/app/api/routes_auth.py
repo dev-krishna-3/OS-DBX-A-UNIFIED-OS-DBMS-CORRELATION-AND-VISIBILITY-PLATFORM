@@ -690,20 +690,16 @@ def send_verification_email_endpoint(
         codes.append({"code": code, "email": current_user.email, "expires_at": expires_at, "used": False})
 
     sent = send_email_verification_code(current_user.email, current_user.username, code)
-    if sent:
-        return {
-            "success": True,
-            "is_simulation": False,
-            "message": f"Verification code sent to {current_user.email}. Please check your inbox.",
-        }
-    else:
-        # Fallback simulation for environments without outgoing SMTP configured
-        return {
-            "success": True,
-            "is_simulation": True,
-            "demo_code": code,
-            "message": f"Verification code generated (Simulation mode: {code}). Please enter this code to complete registration.",
-        }
+    if not sent:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to deliver verification code to {current_user.email}. Please ensure SMTP service is reachable.",
+        )
+
+    return {
+        "success": True,
+        "message": f"Verification code sent to {current_user.email}. Please check your email inbox.",
+    }
 
 
 @router.post("/verify-email/confirm")
