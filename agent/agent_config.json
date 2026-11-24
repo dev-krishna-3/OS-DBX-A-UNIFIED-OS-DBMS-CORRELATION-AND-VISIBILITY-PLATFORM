@@ -1,6 +1,6 @@
 {
   "server_url": "https://testing-4bux.onrender.com",
-  "host_id": "0cf8e73b-d573-477f-a368-4271f7440450",
+  "host_id": "",
   "api_token": "8xC_xZOr4QpFe0c0ZV1ZD2nwT03FzbHlME166yPU6ULSqyyDtcJo6mc7gv8ADcXx",
   "poll_interval_sec": 3.0,
   "watch_paths": [

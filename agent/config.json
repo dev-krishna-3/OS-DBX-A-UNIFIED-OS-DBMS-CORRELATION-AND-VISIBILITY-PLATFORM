@@ -1,7 +1,9 @@
 {
-  "server_url": "https://os-dbx-api.onrender.com",
+  "server_url": "https://testing-4bux.onrender.com",
   "host_id": "",
-  "watch_paths": ["."],
+  "api_token": "8xC_xZOr4QpFe0c0ZV1ZD2nwT03FzbHlME166yPU6ULSqyyDtcJo6mc7gv8ADcXx",
   "poll_interval_sec": 3.0,
-  "max_batch_size": 25
+  "watch_paths": [
+    "."
+  ]
 }
