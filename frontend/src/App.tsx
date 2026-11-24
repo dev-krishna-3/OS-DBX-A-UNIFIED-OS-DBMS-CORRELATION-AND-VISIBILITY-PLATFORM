@@ -493,6 +493,10 @@ function App() {
         ? `${rawType} · ${pName}`
         : rawType.charAt(0).toUpperCase() + rawType.slice(1);
       const detailParts: string[] = [];
+      const hostLabel = ev.host_id ? String(ev.host_id) : '';
+      if (hostLabel && hostLabel !== 'null' && hostLabel !== 'localhost') {
+        detailParts.push(`PC: ${hostLabel}`);
+      }
       if (ev.pid) detailParts.push(`PID ${String(ev.pid)}`);
       if (ev.file_path) detailParts.push(String(ev.file_path));
       else if (ev.user) detailParts.push(String(ev.user));
@@ -520,11 +524,12 @@ function App() {
 
     // 3. Map Live Windows Processes
     for (const proc of liveData.processes.slice(0, 15)) {
+      const procHost = proc.host_id ? ` · PC: ${String(proc.host_id)}` : '';
       osList.push({
         time: 'Live host',
         source: 'OS',
         title: `Process observed · ${String(proc.name ?? 'system_process')}`,
-        detail: `PID ${proc.pid} · State: ${String(proc.state ?? 'RUNNING').toLowerCase()}${proc.memory_rss_mb ? ` · ${proc.memory_rss_mb} MB` : ''}${proc.user ? ` · ${proc.user}` : ''}`,
+        detail: `PID ${proc.pid} · State: ${String(proc.state ?? 'RUNNING').toLowerCase()}${procHost}${proc.memory_rss_mb ? ` · ${proc.memory_rss_mb} MB` : ''}${proc.user ? ` · ${proc.user}` : ''}`,
         status: 'observed',
       });
     }
