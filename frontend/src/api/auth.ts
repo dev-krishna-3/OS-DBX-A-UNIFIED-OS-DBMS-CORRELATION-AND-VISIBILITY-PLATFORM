@@ -7,6 +7,7 @@ export interface AuthUser {
   email: string | null;
   is_admin: boolean;
   email_verified?: boolean;
+  totp_enabled?: boolean;
   created_at: string;
 }
 
@@ -85,12 +86,28 @@ export const authApi = {
     return apiRequest<AuthUser>('/auth/me');
   },
 
-  sendVerificationEmail(): Promise<{ success: boolean; message: string; email_verified?: boolean }> {
+  sendVerificationEmail(): Promise<{ success: boolean; message: string; is_simulation?: boolean; demo_code?: string; email_verified?: boolean }> {
     return postJson('/auth/verify-email/send', {});
   },
 
   confirmVerificationEmail(code: string): Promise<{ success: boolean; message: string; email_verified: boolean }> {
     return postJson('/auth/verify-email/confirm', { code });
+  },
+
+  totpStatus(): Promise<{ totp_enabled: boolean; username: string }> {
+    return apiRequest('/auth/totp/status');
+  },
+
+  totpSetup(): Promise<{ secret: string; provisioning_uri: string; qr_code_url: string }> {
+    return postJson('/auth/totp/setup', {});
+  },
+
+  totpEnable(code: string): Promise<{ success: boolean; totp_enabled: boolean; message: string }> {
+    return postJson('/auth/totp/enable', { code });
+  },
+
+  totpDisable(): Promise<{ success: boolean; totp_enabled: boolean; message: string }> {
+    return postJson('/auth/totp/disable', {});
   },
 
   signOut(): void {

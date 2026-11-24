@@ -11,6 +11,7 @@ class UserBase(BaseModel):
     uid_linux: Optional[int] = Field(default=None, description="Linux UID for the user")
     is_admin: bool = Field(default=False, description="Admin privilege flag")
     email_verified: bool = Field(default=False, description="Email verification status")
+    totp_enabled: bool = Field(default=False, description="Google Authenticator 2FA status")
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=100)
@@ -116,4 +117,19 @@ class RegistrationApprovalAction(BaseModel):
 
 class VerifyEmailConfirmRequest(BaseModel):
     code: str = Field(min_length=6, max_length=6, description="6-digit verification code")
+
+
+class TotpSetupResponse(BaseModel):
+    secret: str
+    provisioning_uri: str
+    qr_code_url: str
+
+
+class TotpVerifyRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=6, description="6-digit authenticator code")
+
+
+class TotpStatusResponse(BaseModel):
+    totp_enabled: bool
+    message: str
 

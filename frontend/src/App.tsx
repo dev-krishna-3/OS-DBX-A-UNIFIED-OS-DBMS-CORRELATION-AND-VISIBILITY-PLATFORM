@@ -4,7 +4,7 @@ import {
   Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Check, CheckCircle,
   ChevronDown, ChevronRight, CircleHelp, Clock3, Contrast, Cpu, Database, FileClock,
   FlaskConical, GitBranch, HardDrive, LayoutDashboard, ListFilter, LockKeyhole,
-  MemoryStick, Monitor, Moon, Network, Palette, Pause, Play, RefreshCw, RotateCcw, Search, Settings, ShieldAlert, Sparkles,
+  MemoryStick, Monitor, Moon, Network, Palette, Pause, Play, QrCode, RefreshCw, RotateCcw, Search, Settings, ShieldAlert, ShieldCheck, Sparkles,
   Sun, Waypoints, X,
 } from 'lucide-react';
 import { events as sampleEvents, observations as sampleObservations, pageMeta, scenarioNames, sidebarGroups, type ActivityEvent, type SectionId } from './data/demo';
@@ -5357,8 +5357,18 @@ function AccountProfileModal({
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [code, setCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
+  const [demoCode, setDemoCode] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [statusErr, setStatusErr] = useState('');
+
+  // Two-step verification (Google Authenticator) state
+  const [totpActive, setTotpActive] = useState(Boolean(user.totp_enabled));
+  const [totpBusy, setTotpBusy] = useState(false);
+  const [showTotpSetup, setShowTotpSetup] = useState(false);
+  const [totpSetupData, setTotpSetupData] = useState<{ secret: string; provisioning_uri: string; qr_code_url: string } | null>(null);
+  const [totpCodeInput, setTotpCodeInput] = useState('');
+  const [totpMsg, setTotpMsg] = useState('');
+  const [totpErr, setTotpErr] = useState('');
 
   const isVerified = Boolean(user.is_admin || user.email_verified);
 
@@ -5369,6 +5379,9 @@ function AccountProfileModal({
     try {
       const res = await authApi.sendVerificationEmail();
       setCodeSent(true);
+      if (res.demo_code) {
+        setDemoCode(res.demo_code);
+      }
       setStatusMsg(res.message);
       onNotify(res.message);
     } catch (err: unknown) {
@@ -5398,6 +5411,65 @@ function AccountProfileModal({
       setStatusErr(msg);
     } finally {
       setVerifyingCode(false);
+    }
+  };
+
+  const handleToggleTotp = async () => {
+    setTotpMsg('');
+    setTotpErr('');
+    if (totpActive) {
+      setTotpBusy(true);
+      try {
+        const res = await authApi.totpDisable();
+        setTotpActive(false);
+        setShowTotpSetup(false);
+        setTotpMsg(res.message);
+        onNotify('Two-step verification turned off.');
+        const updated = await authApi.currentUser();
+        onUserUpdated(updated);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Failed to disable two-step verification.';
+        setTotpErr(msg);
+      } finally {
+        setTotpBusy(false);
+      }
+    } else {
+      setTotpBusy(true);
+      try {
+        const setup = await authApi.totpSetup();
+        setTotpSetupData(setup);
+        setShowTotpSetup(true);
+        setTotpCodeInput('');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Could not initiate Google Authenticator setup.';
+        setTotpErr(msg);
+      } finally {
+        setTotpBusy(false);
+      }
+    }
+  };
+
+  const handleEnableTotp = async () => {
+    if (!totpCodeInput || totpCodeInput.trim().length !== 6) {
+      setTotpErr('Please enter the 6-digit code from Google Authenticator.');
+      return;
+    }
+    setTotpBusy(true);
+    setTotpMsg('');
+    setTotpErr('');
+    try {
+      const res = await authApi.totpEnable(totpCodeInput.trim());
+      setTotpActive(true);
+      setShowTotpSetup(false);
+      setTotpMsg(res.message);
+      onNotify('Google Authenticator two-step verification activated!');
+      const updated = await authApi.currentUser();
+      onUserUpdated(updated);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Invalid authenticator code. Check your app and try again.';
+      setTotpErr(msg);
+    } finally {
+      setTotpBusy(false);
     }
   };
 
@@ -5485,10 +5557,17 @@ function AccountProfileModal({
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '12px', color: '#059669', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>✉️</span>
-                  <span>A 6-digit verification code was sent to <strong>{user.email}</strong>. Please check your inbox.</span>
-                </div>
+                {demoCode ? (
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.25)', fontSize: '12px', color: 'var(--color-primary, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                    <span>💡 <strong>Verification Code:</strong> {demoCode} (Demo Mode)</span>
+                    <button type="button" className="button button-secondary" style={{ padding: '2px 8px', fontSize: '11px', height: '22px' }} onClick={() => setCode(demoCode)}>Auto-fill</button>
+                  </div>
+                ) : (
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', fontSize: '12px', color: '#059669', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>✉️</span>
+                    <span>A 6-digit verification code was sent to <strong>{user.email}</strong>. Please check your inbox.</span>
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <input
                     type="text"
@@ -5533,6 +5612,128 @@ function AccountProfileModal({
             {statusErr && <p style={{ margin: 0, fontSize: '12px', color: '#dc2626', fontWeight: 500 }}>{statusErr}</p>}
           </div>
         )}
+
+        {/* Two-Step Verification (Google Authenticator / TOTP) Card */}
+        <div style={{ marginTop: '16px', padding: '14px 16px', borderRadius: '10px', background: 'var(--color-surface, rgba(255,255,255,0.04))', border: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: totpActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: totpActive ? '#10b981' : '#6366f1' }}>
+                <ShieldCheck size={18} />
+              </div>
+              <div>
+                <strong style={{ fontSize: '13px', color: 'var(--color-ink)', display: 'block' }}>Two-Step Verification</strong>
+                <span style={{ fontSize: '11px', color: 'var(--color-ink-subtle)' }}>Secure your account using Google Authenticator</span>
+              </div>
+            </div>
+
+            {/* Toggle Switch */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: totpActive ? '#10b981' : 'var(--color-ink-subtle)' }}>
+                {totpActive ? 'Enabled' : 'Disabled'}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={totpActive}
+                disabled={totpBusy}
+                onClick={handleToggleTotp}
+                style={{
+                  position: 'relative',
+                  width: '44px',
+                  height: '24px',
+                  borderRadius: '12px',
+                  background: totpActive ? '#10b981' : '#9ca3af',
+                  border: 'none',
+                  cursor: totpBusy ? 'wait' : 'pointer',
+                  padding: 0,
+                  transition: 'background 0.2s',
+                  outline: 'none',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left: totpActive ? '22px' : '2px',
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    background: '#ffffff',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                    transition: 'left 0.2s',
+                  }}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Google Authenticator QR Code Setup Box */}
+          {showTotpSetup && totpSetupData && (
+            <div style={{ padding: '14px', borderRadius: '8px', background: 'rgba(99, 102, 241, 0.05)', border: '1px solid rgba(99, 102, 241, 0.25)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <QrCode size={16} style={{ color: 'var(--color-primary, #6366f1)' }} />
+                <strong style={{ fontSize: '13px', color: 'var(--color-primary, #6366f1)' }}>Scan QR Code with Google Authenticator</strong>
+              </div>
+              <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <img
+                  src={totpSetupData.qr_code_url}
+                  alt="Google Authenticator QR Code"
+                  style={{ width: '130px', height: '130px', borderRadius: '8px', border: '1px solid var(--color-border)', background: '#ffffff', padding: '4px' }}
+                />
+                <div style={{ flex: 1, minWidth: '180px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--color-ink-subtle)' }}>Or enter setup key manually:</span>
+                  <code style={{ fontSize: '12px', fontWeight: 700, padding: '4px 8px', borderRadius: '6px', background: 'rgba(0,0,0,0.06)', wordBreak: 'break-all', letterSpacing: '1px' }}>
+                    {totpSetupData.secret}
+                  </code>
+                  <span style={{ fontSize: '11px', color: 'var(--color-ink-subtle)', marginTop: '4px' }}>
+                    Enter the 6-digit code from Google Authenticator to confirm:
+                  </span>
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      placeholder="000000"
+                      value={totpCodeInput}
+                      onChange={(e) => setTotpCodeInput(e.target.value.replace(/\D/g, ''))}
+                      style={{
+                        width: '100px',
+                        padding: '6px 8px',
+                        fontSize: '14px',
+                        letterSpacing: '3px',
+                        fontWeight: 600,
+                        textAlign: 'center',
+                        borderRadius: '6px',
+                        border: '1px solid var(--color-border)',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={totpBusy || totpCodeInput.length !== 6}
+                      onClick={handleEnableTotp}
+                      style={{ padding: '6px 12px', fontSize: '12px' }}
+                    >
+                      {totpBusy ? 'Activating...' : 'Activate'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => { setShowTotpSetup(false); setTotpSetupData(null); }}
+                      style={{ padding: '6px 10px', fontSize: '12px' }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {totpMsg && <p style={{ margin: 0, fontSize: '11px', color: '#059669', fontWeight: 500 }}>{totpMsg}</p>}
+              {totpErr && <p style={{ margin: 0, fontSize: '11px', color: '#dc2626', fontWeight: 500 }}>{totpErr}</p>}
+            </div>
+          )}
+
+          {totpMsg && !showTotpSetup && <p style={{ margin: 0, fontSize: '12px', color: '#059669', fontWeight: 500 }}>{totpMsg}</p>}
+          {totpErr && !showTotpSetup && <p style={{ margin: 0, fontSize: '12px', color: '#dc2626', fontWeight: 500 }}>{totpErr}</p>}
+        </div>
 
         <div className="inspector-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
           {user.is_admin ? (

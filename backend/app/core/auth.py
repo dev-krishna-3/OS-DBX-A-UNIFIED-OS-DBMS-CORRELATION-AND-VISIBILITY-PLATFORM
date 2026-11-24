@@ -101,7 +101,8 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
         try:
             cursor.execute(
                 "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
-                "COALESCE(email_verified, 0) as email_verified "
+                "COALESCE(email_verified, 0) as email_verified, "
+                "COALESCE(totp_enabled, 0) as totp_enabled "
                 "FROM users WHERE username = %s OR email = %s LIMIT 1",
                 (username, username)
             )
@@ -140,6 +141,7 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
             user_dict["email_verified"] = True
         else:
             user_dict["email_verified"] = bool(user_dict.get("email_verified", False))
+        user_dict["totp_enabled"] = bool(user_dict.get("totp_enabled", False))
 
         return UserInDB(**user_dict)
     return _memory_users.get(uname)
