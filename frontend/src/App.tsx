@@ -1044,11 +1044,10 @@ function App() {
                 className="button button-primary"
                 style={{ padding: '4px 12px', fontSize: '12px', height: '30px' }}
                 onClick={() => {
-                  openSection('admin');
-                  setActiveTab('Accounts & sign-in');
+                  setProfileModalOpen(true);
                 }}
               >
-                Verify in Account Panel →
+                Verify in Profile →
               </button>
             </div>
           )}
@@ -1197,89 +1196,22 @@ function App() {
       )}
 
       {profileModalOpen && (
-        <div className="inspector-overlay" onClick={() => setProfileModalOpen(false)} role="dialog" aria-modal="true" aria-label="Account Profile">
-          <div className="inspector-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
-            <div className="inspector-header">
-              <div className="inspector-header-left">
-                <span className="event-source" style={{ width: 'auto', padding: '3px 10px', background: currentUser.is_admin ? 'rgba(99, 102, 241, 0.15)' : 'rgba(16, 185, 129, 0.15)', color: currentUser.is_admin ? '#818cf8' : '#34d399' }}>
-                  {currentUser.is_admin ? 'Administrator Role' : 'Member Role'}
-                </span>
-                <h3>Account Profile</h3>
-              </div>
-              <button type="button" className="icon-button" onClick={() => setProfileModalOpen(false)} aria-label="Close profile">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="account-profile" style={{ margin: '8px 0 16px' }}>
-              <div className="account-avatar" style={{ width: '48px', height: '48px', fontSize: '16px' }}>
-                {currentUser.username.slice(0, 2).toUpperCase()}
-              </div>
-              <div style={{ marginLeft: '12px' }}>
-                <strong style={{ fontSize: '16px', color: 'var(--color-ink)' }}>{currentUser.username}</strong>
-                <small style={{ color: 'var(--color-ink-2)', fontSize: '13px' }}>{currentUser.email ?? 'No email address registered'}</small>
-              </div>
-            </div>
-
-            <div className="inspector-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
-              <div className="inspector-stat">
-                <span className="inspector-label">System Identity (Host UID)</span>
-                <strong>UID {currentUser.uid_linux ?? 1000}</strong>
-              </div>
-              <div className="inspector-stat">
-                <span className="inspector-label">Access Level</span>
-                <span className={`state-label ${currentUser.is_admin ? 'state-linked' : 'state-observed'}`}>
-                  {currentUser.is_admin ? 'System Administrator' : 'Standard Member (Read-Only)'}
-                </span>
-              </div>
-              <div className="inspector-stat">
-                <span className="inspector-label">Security Role</span>
-                <strong>{currentUser.is_admin ? 'admin' : 'member'}</strong>
-              </div>
-              <div className="inspector-stat">
-                <span className="inspector-label">Session Status</span>
-                <strong style={{ color: '#10b981' }}>Active (JWT Authenticated)</strong>
-              </div>
-            </div>
-
-            <div className="inspector-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
-              {currentUser.is_admin ? (
-                <button
-                  type="button"
-                  className="button button-primary"
-                  onClick={() => {
-                    setProfileModalOpen(false);
-                    openSection('admin');
-                  }}
-                >
-                  <Settings size={15} /> Administration Console
-                </button>
-              ) : (
-                <span style={{ fontSize: '12px', color: 'var(--color-ink-subtle)' }}>
-                  Standard member telemetry access
-                </span>
-              )}
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="button"
-                  className="button button-danger"
-                  style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
-                  onClick={() => {
-                    authApi.signOut();
-                    setCurrentUser(null);
-                    setProfileModalOpen(false);
-                    notify('Signed out successfully.');
-                  }}
-                >
-                  Sign out
-                </button>
-                <button type="button" className="button button-secondary" onClick={() => setProfileModalOpen(false)}>
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <AccountProfileModal
+          user={currentUser}
+          onClose={() => setProfileModalOpen(false)}
+          onOpenAdmin={() => {
+            setProfileModalOpen(false);
+            openSection('admin');
+          }}
+          onSignOut={() => {
+            authApi.signOut();
+            setCurrentUser(null);
+            setProfileModalOpen(false);
+            notify('Signed out successfully.');
+          }}
+          onUserUpdated={(updated) => setCurrentUser(updated)}
+          onNotify={(msg) => notify(msg)}
+        />
       )}
       <AnimatePresence>
         {notice && <m.div className="toast" role="status" key="notice"
@@ -5404,6 +5336,251 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
       <label className="toggle-control"><input type="checkbox" checked={sampleMode} onChange={onToggleSample} /><span className="toggle-track" /><strong>{sampleMode ? 'Sample mode' : 'Live telemetry stream'}</strong></label>
     </section>
   </>;
+}
+
+function AccountProfileModal({
+  user,
+  onClose,
+  onOpenAdmin,
+  onSignOut,
+  onUserUpdated,
+  onNotify,
+}: {
+  user: AuthUser;
+  onClose: () => void;
+  onOpenAdmin: () => void;
+  onSignOut: () => void;
+  onUserUpdated: (u: AuthUser) => void;
+  onNotify: (msg: string) => void;
+}) {
+  const [sendingCode, setSendingCode] = useState(false);
+  const [verifyingCode, setVerifyingCode] = useState(false);
+  const [code, setCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [demoCode, setDemoCode] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [statusErr, setStatusErr] = useState('');
+
+  const isVerified = Boolean(user.is_admin || user.email_verified);
+
+  const handleSendCode = async () => {
+    setSendingCode(true);
+    setStatusMsg('');
+    setStatusErr('');
+    try {
+      const res = await authApi.sendVerificationEmail();
+      setCodeSent(true);
+      if (res.demo_code) {
+        setDemoCode(res.demo_code);
+      }
+      setStatusMsg(res.message);
+      onNotify(res.message);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not send verification code.';
+      setStatusErr(msg);
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleConfirmCode = async () => {
+    if (!code || code.trim().length !== 6) {
+      setStatusErr('Please enter a 6-digit verification code.');
+      return;
+    }
+    setVerifyingCode(true);
+    setStatusMsg('');
+    setStatusErr('');
+    try {
+      const res = await authApi.confirmVerificationEmail(code.trim());
+      setStatusMsg(res.message);
+      onNotify('Email verified successfully! Registration is now complete.');
+      const updated = await authApi.currentUser();
+      onUserUpdated(updated);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Invalid verification code.';
+      setStatusErr(msg);
+    } finally {
+      setVerifyingCode(false);
+    }
+  };
+
+  return (
+    <div className="inspector-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label="Account Profile">
+      <div className="inspector-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', width: '100%' }}>
+        <div className="inspector-header">
+          <div className="inspector-header-left">
+            <span className="event-source" style={{ width: 'auto', padding: '3px 10px', background: user.is_admin ? 'rgba(99, 102, 241, 0.15)' : 'rgba(16, 185, 129, 0.15)', color: user.is_admin ? '#818cf8' : '#34d399' }}>
+              {user.is_admin ? 'Administrator Role' : 'Member Role'}
+            </span>
+            <h3>Account Profile</h3>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close profile">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="account-profile" style={{ margin: '8px 0 16px' }}>
+          <div className="account-avatar" style={{ width: '48px', height: '48px', fontSize: '16px' }}>
+            {user.username.slice(0, 2).toUpperCase()}
+          </div>
+          <div style={{ marginLeft: '12px' }}>
+            <strong style={{ fontSize: '16px', color: 'var(--color-ink)' }}>{user.username}</strong>
+            <small style={{ color: 'var(--color-ink-2)', fontSize: '13px' }}>{user.email ?? 'No email address registered'}</small>
+          </div>
+        </div>
+
+        <div className="inspector-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
+          <div className="inspector-stat">
+            <span className="inspector-label">System Identity (Host UID)</span>
+            <strong>UID {user.uid_linux ?? 1000}</strong>
+          </div>
+          <div className="inspector-stat">
+            <span className="inspector-label">Access Level</span>
+            <span className={`state-label ${user.is_admin ? 'state-linked' : 'state-observed'}`}>
+              {user.is_admin ? 'System Administrator' : 'Standard Member'}
+            </span>
+          </div>
+          <div className="inspector-stat">
+            <span className="inspector-label">Security Role</span>
+            <strong>{user.is_admin ? 'admin' : 'member'}</strong>
+          </div>
+          <div className="inspector-stat">
+            <span className="inspector-label">Registration Status</span>
+            <strong style={{ color: isVerified ? '#10b981' : '#f59e0b' }}>
+              {isVerified ? 'Verified' : 'Pending Verification'}
+            </strong>
+          </div>
+        </div>
+
+        {/* Email Verification Box */}
+        {isVerified ? (
+          <div style={{ marginTop: '16px', padding: '12px 14px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <CheckCircle size={18} style={{ color: '#059669', flexShrink: 0 }} />
+            <div>
+              <strong style={{ color: '#059669', fontSize: '13px', display: 'block' }}>Email Verified & Registration Complete</strong>
+              <span style={{ fontSize: '12px', color: 'var(--color-ink-subtle)' }}>Your email address ({user.email || 'Admin identity'}) is confirmed.</span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginTop: '16px', padding: '14px 16px', borderRadius: '10px', background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={16} style={{ color: '#d97706' }} />
+                <strong style={{ fontSize: '13px', color: 'var(--color-ink)' }}>Complete Registration: Verify Email</strong>
+              </div>
+              <span className="event-tag tag-amber" style={{ fontSize: '11px' }}>Action Required</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '12px', color: 'var(--color-ink-subtle)', lineHeight: 1.5 }}>
+              Please verify your email (<strong>{user.email}</strong>) to finalize your account registration.
+            </p>
+
+            {!codeSent ? (
+              <div>
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={sendingCode}
+                  onClick={handleSendCode}
+                  style={{ padding: '6px 14px', fontSize: '12px' }}
+                >
+                  {sendingCode ? 'Sending Code...' : 'Send 6-Digit Verification Code'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {demoCode && (
+                  <div style={{ padding: '6px 10px', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', fontSize: '12px', color: 'var(--color-primary, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                    <span>💡 <strong>Demo Code:</strong> {demoCode} (Evaluation simulation)</span>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      style={{ padding: '2px 8px', fontSize: '11px', height: '22px' }}
+                      onClick={() => setCode(demoCode)}
+                    >
+                      Auto-fill
+                    </button>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    placeholder="6-digit code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--color-border)',
+                      width: '130px',
+                      letterSpacing: '3px',
+                      fontWeight: 600,
+                      textAlign: 'center',
+                      fontSize: '13px',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={verifyingCode || code.trim().length !== 6}
+                    onClick={handleConfirmCode}
+                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                  >
+                    {verifyingCode ? 'Verifying...' : 'Confirm'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={sendingCode}
+                    onClick={handleSendCode}
+                    style={{ padding: '6px 10px', fontSize: '12px' }}
+                  >
+                    Resend Code
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {statusMsg && <p style={{ margin: 0, fontSize: '12px', color: '#059669', fontWeight: 500 }}>{statusMsg}</p>}
+            {statusErr && <p style={{ margin: 0, fontSize: '12px', color: '#dc2626', fontWeight: 500 }}>{statusErr}</p>}
+          </div>
+        )}
+
+        <div className="inspector-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
+          {user.is_admin ? (
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => {
+                onClose();
+                onOpenAdmin();
+              }}
+            >
+              <Settings size={15} /> Administration Console
+            </button>
+          ) : (
+            <span style={{ fontSize: '12px', color: 'var(--color-ink-subtle)' }}>
+              Standard member telemetry access
+            </span>
+          )}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className="button button-danger"
+              style={{ background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+              onClick={onSignOut}
+            >
+              Sign out
+            </button>
+            <button type="button" className="button button-secondary" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AccountSettings({

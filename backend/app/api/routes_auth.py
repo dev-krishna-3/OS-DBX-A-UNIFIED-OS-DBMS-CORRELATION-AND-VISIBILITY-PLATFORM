@@ -3,6 +3,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 import uuid
+import secrets
 import time
 import threading
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
@@ -371,9 +372,6 @@ def approve_registration_request(
                             """,
                             (req_data["username"], uid_linux, req_data["password_hash"], 1 if is_admin else 0)
                         )
-                        """,
-                        (req_data["username"], uid_linux, req_data["password_hash"], 1 if is_admin else 0)
-                    )
                 else:
                     raise
             user_id = int(cur.lastrowid)

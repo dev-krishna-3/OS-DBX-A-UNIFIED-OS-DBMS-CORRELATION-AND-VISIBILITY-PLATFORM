@@ -106,5 +106,28 @@ def test_registration_request_and_admin_approval_lifecycle():
         user_info = me_resp.json()
         assert user_info["username"] == "mushkan_test"
         assert user_info["email"] == "mushkan012@example.com"
+        assert user_info.get("email_verified") is False
+
+        # 8. User requests email verification code
+        send_code_resp = client.post("/api/auth/verify-email/send", headers={"Authorization": f"Bearer {user_token}"})
+        assert send_code_resp.status_code == 200, send_code_resp.text
+        code_data = send_code_resp.json()
+        assert code_data["success"] is True
+        code = code_data.get("demo_code")
+        assert code is not None, "Demo code should be returned in simulation environment"
+
+        # 9. Invalid code should fail
+        bad_confirm = client.post("/api/auth/verify-email/confirm", headers={"Authorization": f"Bearer {user_token}"}, json={"code": "000000"})
+        assert bad_confirm.status_code == 400
+
+        # 10. Valid code should verify account
+        good_confirm = client.post("/api/auth/verify-email/confirm", headers={"Authorization": f"Bearer {user_token}"}, json={"code": code})
+        assert good_confirm.status_code == 200
+        assert good_confirm.json()["success"] is True
+
+        # 11. /me now reflects verified status
+        me_verified_resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {user_token}"})
+        assert me_verified_resp.status_code == 200
+        assert me_verified_resp.json().get("email_verified") is True
     finally:
         pass
