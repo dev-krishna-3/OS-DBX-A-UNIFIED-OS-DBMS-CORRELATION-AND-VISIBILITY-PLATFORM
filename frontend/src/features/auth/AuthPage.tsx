@@ -121,7 +121,7 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
         <section className="login-form-side">
           <div className="login-form-topline">
             <span className="login-secure"><LockKeyhole size={14} /> Secure workspace</span>
-            <span className="login-local-label"><i /> Local environment</span>
+            <span className="login-local-label"><i /> Cloud workspace</span>
           </div>
 
           <div className="login-form-content">
@@ -144,39 +144,6 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
                 </button>
               ))}
             </div>
-
-            {!isRequest && (
-              <div
-                style={{
-                  marginBottom: '16px',
-                  padding: '10px 14px',
-                  borderRadius: '10px',
-                  background: 'rgba(99, 102, 241, 0.09)',
-                  border: '1px solid rgba(99, 102, 241, 0.22)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '8px',
-                }}
-              >
-                <div style={{ fontSize: '12px', lineHeight: 1.4 }}>
-                  <strong style={{ color: 'var(--color-primary, #6366f1)', display: 'block' }}>Administrator Login</strong>
-                  <span style={{ color: 'var(--color-ink-subtle)' }}>admin · DevAdminPassword123!</span>
-                </div>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  style={{ padding: '3px 10px', fontSize: '11px', height: '26px', whiteSpace: 'nowrap' }}
-                  onClick={() => {
-                    setEmail('admin');
-                    setPassword('DevAdminPassword123!');
-                    setError('');
-                  }}
-                >
-                  Fill Admin
-                </button>
-              </div>
-            )}
 
             <form id="account-form" className="login-form" onSubmit={submit}>
               {isRequest && (
@@ -300,6 +267,18 @@ export default function AuthPage({ onAuthenticated }: AuthPageProps) {
               {!isRequest && (
                 <div className="login-form-options">
                   <button type="button" className="forgot-link" onClick={() => setMessage('Password recovery is managed by the administrator. Contact your administrator to reset access.')}>Forgot password?</button>
+                  <button
+                    type="button"
+                    className="forgot-link"
+                    style={{ color: 'var(--color-primary, #6366f1)', fontWeight: 500 }}
+                    onClick={() => {
+                      setEmail('admin');
+                      setPassword('AdminPass123456!');
+                      setError('');
+                    }}
+                  >
+                    Quick-fill admin
+                  </button>
                 </div>
               )}
 
