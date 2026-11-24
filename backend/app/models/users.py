@@ -10,6 +10,7 @@ class UserBase(BaseModel):
     email: Optional[str] = Field(default=None, max_length=255, description="Email address for the user")
     uid_linux: Optional[int] = Field(default=None, description="Linux UID for the user")
     is_admin: bool = Field(default=False, description="Admin privilege flag")
+    email_verified: bool = Field(default=False, description="Email verification status")
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=100)
@@ -111,4 +112,8 @@ class RegistrationApprovalAction(BaseModel):
         if normalized not in {"inspector", "member", "owner"}:
             return "inspector"
         return normalized
+
+
+class VerifyEmailConfirmRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=6, description="6-digit verification code")
 

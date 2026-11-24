@@ -100,18 +100,27 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
     try:
         try:
             cursor.execute(
-                "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin "
+                "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
+                "COALESCE(email_verified, 0) as email_verified "
                 "FROM users WHERE username = %s OR email = %s LIMIT 1",
                 (username, username)
             )
             user_dict = cursor.fetchone()
         except Exception:
-            cursor.execute(
-                "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin "
-                "FROM users WHERE username = %s LIMIT 1",
-                (username,)
-            )
-            user_dict = cursor.fetchone()
+            try:
+                cursor.execute(
+                    "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin "
+                    "FROM users WHERE username = %s OR email = %s LIMIT 1",
+                    (username, username)
+                )
+                user_dict = cursor.fetchone()
+            except Exception:
+                cursor.execute(
+                    "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin "
+                    "FROM users WHERE username = %s LIMIT 1",
+                    (username,)
+                )
+                user_dict = cursor.fetchone()
     except Exception:
         user_dict = None
     finally:
@@ -125,7 +134,12 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
         if user_dict.get("password_hash") is None:
             user_dict["password_hash"] = ""
         
-        user_dict["is_admin"] = bool(user_dict.get("is_admin")) or (uname in {"admin", "admin@osdbx.local"})
+        is_admin_flag = bool(user_dict.get("is_admin")) or (uname in {"admin", "admin@osdbx.local"})
+        user_dict["is_admin"] = is_admin_flag
+        if is_admin_flag:
+            user_dict["email_verified"] = True
+        else:
+            user_dict["email_verified"] = bool(user_dict.get("email_verified", False))
 
         return UserInDB(**user_dict)
     return _memory_users.get(uname)

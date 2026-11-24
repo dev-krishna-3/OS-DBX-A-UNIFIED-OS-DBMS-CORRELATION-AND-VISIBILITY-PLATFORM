@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'framer-motion';
 import {
-  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Check,
+  Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Check, CheckCircle,
   ChevronDown, ChevronRight, CircleHelp, Clock3, Contrast, Cpu, Database, FileClock,
   FlaskConical, GitBranch, HardDrive, LayoutDashboard, ListFilter, LockKeyhole,
   MemoryStick, Monitor, Moon, Network, Palette, Pause, Play, RefreshCw, RotateCcw, Search, Settings, ShieldAlert, Sparkles,
@@ -1018,6 +1018,41 @@ function App() {
             if (syncDropdownOpen) setSyncDropdownOpen(false);
           }}
         >
+          {currentUser && !currentUser.email_verified && !currentUser.is_admin && (
+            <div
+              style={{
+                marginBottom: '16px',
+                padding: '12px 16px',
+                borderRadius: '12px',
+                background: 'linear-gradient(90deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.05))',
+                border: '1px solid rgba(245, 158, 11, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <ShieldAlert size={18} style={{ color: '#d97706', flexShrink: 0 }} />
+                <div style={{ fontSize: '13px', color: 'var(--color-ink)' }}>
+                  <strong>Action Required:</strong> Please complete your registration by verifying your email address (<strong>{currentUser.email || currentUser.username}</strong>).
+                </div>
+              </div>
+              <button
+                type="button"
+                className="button button-primary"
+                style={{ padding: '4px 12px', fontSize: '12px', height: '30px' }}
+                onClick={() => {
+                  openSection('admin');
+                  setActiveTab('Accounts & sign-in');
+                }}
+              >
+                Verify in Account Panel →
+              </button>
+            </div>
+          )}
+
           <div className="page-heading">
             <div><h1>{title}</h1><p>{pageMeta[section].subtitle}</p></div>
             <div className="heading-actions">
@@ -1058,7 +1093,7 @@ function App() {
             transition={{ duration: prefersReducedMotion ? 0 : 0.18, ease: 'easeOut' }}>
             {section === 'overview'
               ? <Overview events={filteredEvents} liveData={liveData} sampleMode={sampleMode} guidedStep={guidedStep} onRunDemo={() => { setSection('observatory'); setActiveTab('Unified console'); setGuidedStep(0); }} onNextStep={() => setGuidedStep((step) => (step + 1) % 5)} onOpen={(id) => openSection(id)} onSelectEvent={(ev) => setInspectingEvent(ev)} />
-              : <FeaturePage section={section} tab={activeTab} onSelectTab={setActiveTab} events={filteredEvents} liveData={liveData} onRefresh={refreshLiveWorkspace} search={search} selectedAlgorithm={selectedAlgorithm} onAlgorithm={setSelectedAlgorithm} onAction={notify} sampleMode={sampleMode} onToggleSample={() => setSampleMode((value) => !value)} guidedStep={guidedStep} onNextStep={() => setGuidedStep((step) => Math.min(step + 1, 4))} currentUser={currentUser} onSignOut={() => { authApi.signOut(); setCurrentUser(null); }} />}
+              : <FeaturePage section={section} tab={activeTab} onSelectTab={setActiveTab} events={filteredEvents} liveData={liveData} onRefresh={refreshLiveWorkspace} search={search} selectedAlgorithm={selectedAlgorithm} onAlgorithm={setSelectedAlgorithm} onAction={notify} sampleMode={sampleMode} onToggleSample={() => setSampleMode((value) => !value)} guidedStep={guidedStep} onNextStep={() => setGuidedStep((step) => Math.min(step + 1, 4))} currentUser={currentUser} onSignOut={() => { authApi.signOut(); setCurrentUser(null); }} onUserUpdated={(u) => setCurrentUser(u)} />}
           </m.div>
           </AnimatePresence>
 
@@ -1377,8 +1412,8 @@ function EventList({
   );
 }
 
-function FeaturePage({ section, tab, onSelectTab, events: visibleEvents, liveData, onRefresh, search, selectedAlgorithm, onAlgorithm, onAction, sampleMode, onToggleSample, guidedStep, onNextStep, currentUser, onSignOut }: {
-  section: SectionId; tab: string; onSelectTab: (tab: string) => void; events: ActivityEvent[]; liveData: LiveWorkspaceData; onRefresh: (toast?: boolean) => Promise<void>; search: string; selectedAlgorithm: string; onAlgorithm: (value: string) => void; onAction: (message: string) => void; sampleMode: boolean; onToggleSample: () => void; guidedStep: number; onNextStep: () => void; currentUser: AuthUser; onSignOut: () => void;
+function FeaturePage({ section, tab, onSelectTab, events: visibleEvents, liveData, onRefresh, search, selectedAlgorithm, onAlgorithm, onAction, sampleMode, onToggleSample, guidedStep, onNextStep, currentUser, onSignOut, onUserUpdated }: {
+  section: SectionId; tab: string; onSelectTab: (tab: string) => void; events: ActivityEvent[]; liveData: LiveWorkspaceData; onRefresh: (toast?: boolean) => Promise<void>; search: string; selectedAlgorithm: string; onAlgorithm: (value: string) => void; onAction: (message: string) => void; sampleMode: boolean; onToggleSample: () => void; guidedStep: number; onNextStep: () => void; currentUser: AuthUser; onSignOut: () => void; onUserUpdated?: (u: AuthUser) => void;
 }) {
   if (section === 'observatory' && tab === 'Unified console') return <UnifiedConsole guidedStep={guidedStep} onNextStep={onNextStep} onAction={onAction} onRefresh={onRefresh} />;
   if (section === 'observatory' && tab === 'DBMS observations') return <Observations liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} />;
@@ -1391,6 +1426,9 @@ function FeaturePage({ section, tab, onSelectTab, events: visibleEvents, liveDat
   if (section === 'simulations') return <Simulations tab={tab} selectedAlgorithm={selectedAlgorithm} onAlgorithm={onAlgorithm} onAction={onAction} />;
   if (section === 'whatif') return <WhatIf tab={tab} liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} />;
   if (section === 'admin') {
+    if (tab === 'Accounts & sign-in') {
+      return <AccountSettings user={currentUser} onSignOut={onSignOut} onUserUpdated={onUserUpdated} onAction={onAction} />;
+    }
     if (!currentUser.is_admin) {
       return (
         <section className="surface-panel" style={{ padding: '48px 24px', textAlign: 'center', margin: '24px auto', maxWidth: '600px' }}>
@@ -1399,15 +1437,15 @@ function FeaturePage({ section, tab, onSelectTab, events: visibleEvents, liveDat
           </div>
           <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px', color: 'var(--color-ink)' }}>Access Denied</h2>
           <p style={{ color: 'var(--color-ink-subtle)', lineHeight: 1.6, marginBottom: '20px' }}>
-            Administrator privileges are required to access security audit logs and workspace administration. Your current role is <strong>Member</strong>.
+            Administrator privileges are required to access security audit logs and registration requests. Your current role is <strong>Member</strong>.
           </p>
-          <button type="button" className="button button-primary" onClick={() => onAction('Administration is restricted to system administrators.')}>
+          <button type="button" className="button button-primary" onClick={() => onAction('Access requests and audit logs are restricted to administrators.')}>
             Return to Dashboard
           </button>
         </section>
       );
     }
-    return <Administration tab={tab} liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} onToggleSample={onToggleSample} currentUser={currentUser} onSignOut={onSignOut} />;
+    return <Administration tab={tab} liveData={liveData} sampleMode={sampleMode} onRefresh={onRefresh} onAction={onAction} onToggleSample={onToggleSample} currentUser={currentUser} onSignOut={onSignOut} onUserUpdated={onUserUpdated} />;
   }
   return null;
 }
@@ -5041,7 +5079,7 @@ function WhatIfVisualOutput({
   );
 }
 
-function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onToggleSample, currentUser, onSignOut }: { tab: string; liveData: LiveWorkspaceData; sampleMode: boolean; onRefresh: (toast?: boolean) => Promise<void>; onAction: (message: string) => void; onToggleSample: () => void; currentUser: AuthUser; onSignOut: () => void }) {
+function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onToggleSample, currentUser, onSignOut, onUserUpdated }: { tab: string; liveData: LiveWorkspaceData; sampleMode: boolean; onRefresh: (toast?: boolean) => Promise<void>; onAction: (message: string) => void; onToggleSample: () => void; currentUser: AuthUser; onSignOut: () => void; onUserUpdated?: (u: AuthUser) => void }) {
   const [auditActionInput, setAuditActionInput] = useState('SYSTEM_HEALTH_CHECK');
   const [localAuditEntries, setLocalAuditEntries] = useState<Array<{ time: string; user: string; action: string; detail: string; source: string }>>([]);
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
@@ -5071,6 +5109,8 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
     }
   }, [currentUser.is_admin, loadRequests]);
 
+  if (tab === 'Accounts & sign-in') return <AccountSettings user={currentUser} onSignOut={onSignOut} onUserUpdated={onUserUpdated} onAction={onAction} />;
+
   if (!currentUser.is_admin) {
     return (
       <section className="surface-panel" style={{ padding: '48px 24px', textAlign: 'center', margin: '24px auto', maxWidth: '600px' }}>
@@ -5087,8 +5127,6 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
       </section>
     );
   }
-
-  if (tab === 'Accounts & sign-in') return <AccountSettings user={currentUser} onSignOut={onSignOut} />;
 
   const handleApproveRequest = async (requestId: string) => {
     try {
@@ -5368,13 +5406,174 @@ function Administration({ tab, liveData, sampleMode, onRefresh, onAction, onTogg
   </>;
 }
 
-function AccountSettings({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }) {
-  return <section className="surface-panel account-settings">
-    <div className="panel-heading"><div><h3>Signed-in account</h3><p>Authenticated OS-DBX session</p></div><span className="event-tag tag-lavender">{user.is_admin ? 'Administrator' : 'Member'}</span></div>
-    <div className="account-profile"><div className="account-avatar">{user.username.slice(0, 2).toUpperCase()}</div><div><strong>{user.username}</strong><small>{user.email ?? 'No email registered'}</small></div></div>
-    <div className="health-facts"><span>Username <b>{user.username}</b></span><span>Email <b>{user.email ?? 'Not provided'}</b></span><span>Linux UID <b>{user.uid_linux ?? 1000}</b></span><span>Role <b>{user.is_admin ? 'Administrator' : 'Member'}</b></span></div>
-    <button type="button" className="button button-secondary" onClick={onSignOut}>Sign out</button>
-  </section>;
+function AccountSettings({
+  user,
+  onSignOut,
+  onUserUpdated,
+  onAction,
+}: {
+  user: AuthUser;
+  onSignOut: () => void;
+  onUserUpdated?: (u: AuthUser) => void;
+  onAction?: (msg: string) => void;
+}) {
+  const [sendingCode, setSendingCode] = useState(false);
+  const [verifyingCode, setVerifyingCode] = useState(false);
+  const [code, setCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [demoCode, setDemoCode] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [statusErr, setStatusErr] = useState('');
+
+  const isVerified = Boolean(user.is_admin || user.email_verified);
+
+  const handleSendCode = async () => {
+    setSendingCode(true);
+    setStatusMsg('');
+    setStatusErr('');
+    try {
+      const res = await authApi.sendVerificationEmail();
+      setCodeSent(true);
+      if (res.demo_code) {
+        setDemoCode(res.demo_code);
+      }
+      setStatusMsg(res.message);
+      if (onAction) onAction(res.message);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not send verification code.';
+      setStatusErr(msg);
+    } finally {
+      setSendingCode(false);
+    }
+  };
+
+  const handleConfirmCode = async () => {
+    if (!code || code.trim().length !== 6) {
+      setStatusErr('Please enter a 6-digit verification code.');
+      return;
+    }
+    setVerifyingCode(true);
+    setStatusMsg('');
+    setStatusErr('');
+    try {
+      const res = await authApi.confirmVerificationEmail(code.trim());
+      setStatusMsg(res.message);
+      if (onAction) onAction(res.message);
+      const updated = await authApi.currentUser();
+      if (onUserUpdated) onUserUpdated(updated);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Invalid verification code.';
+      setStatusErr(msg);
+    } finally {
+      setVerifyingCode(false);
+    }
+  };
+
+  return (
+    <section className="surface-panel account-settings" style={{ maxWidth: '680px', width: '100%' }}>
+      <div className="panel-heading">
+        <div>
+          <h3>Signed-in account</h3>
+          <p>Authenticated OS-DBX session & security status</p>
+        </div>
+        <span className="event-tag tag-lavender">{user.is_admin ? 'Administrator' : 'Member'}</span>
+      </div>
+
+      <div className="account-profile">
+        <div className="account-avatar">{user.username.slice(0, 2).toUpperCase()}</div>
+        <div>
+          <strong>{user.username}</strong>
+          <small>{user.email ?? 'No email registered'}</small>
+        </div>
+      </div>
+
+      <div className="health-facts">
+        <span>Username <b>{user.username}</b></span>
+        <span>Email <b>{user.email ?? 'Not provided'}</b></span>
+        <span>Linux UID <b>{user.uid_linux ?? 1000}</b></span>
+        <span>Role <b>{user.is_admin ? 'Administrator' : 'Member'}</b></span>
+        <span>Registration <b style={{ color: isVerified ? '#10b981' : '#f59e0b' }}>{isVerified ? 'Verified' : 'Pending Verification'}</b></span>
+      </div>
+
+      {isVerified ? (
+        <div style={{ padding: '14px 18px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', display: 'flex', alignItems: 'center', gap: '12px', width: '100%', boxSizing: 'border-box' }}>
+          <CheckCircle size={20} style={{ color: '#059669', flexShrink: 0 }} />
+          <div>
+            <strong style={{ color: '#059669', fontSize: '13px', display: 'block' }}>Email Verified & Registration Complete</strong>
+            <span style={{ fontSize: '12px', color: 'var(--color-ink-subtle)' }}>Your account email ({user.email || 'Admin identity'}) is verified and actively approved.</span>
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: '16px 18px', borderRadius: '12px', background: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.3)', width: '100%', display: 'flex', flexDirection: 'column', gap: '12px', boxSizing: 'border-box' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+            <div>
+              <strong style={{ fontSize: '14px', color: 'var(--color-ink)', display: 'block' }}>Complete Registration: Verify Email Address</strong>
+              <span style={{ fontSize: '12px', color: 'var(--color-ink-subtle)' }}>Please verify your email ({user.email}) to finalize your account setup.</span>
+            </div>
+            <span className="event-tag tag-amber" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <AlertTriangle size={12} /> Verification Required
+            </span>
+          </div>
+
+          {!codeSent ? (
+            <div>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={sendingCode}
+                onClick={handleSendCode}
+              >
+                {sendingCode ? 'Sending verification code...' : 'Send 6-Digit Verification Code'}
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {demoCode && (
+                <div style={{ padding: '8px 12px', borderRadius: '8px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', fontSize: '12px', color: 'var(--color-primary, #6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                  <span>💡 <strong>Demo Code:</strong> {demoCode} (Generated for evaluation)</span>
+                  <button type="button" className="button button-secondary" style={{ padding: '2px 8px', fontSize: '11px', height: '22px' }} onClick={() => setCode(demoCode)}>Auto-fill</button>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="6-digit code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--color-border)', width: '150px', letterSpacing: '4px', fontWeight: 600, textAlign: 'center' }}
+                />
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={verifyingCode || code.trim().length !== 6}
+                  onClick={handleConfirmCode}
+                >
+                  {verifyingCode ? 'Verifying...' : 'Confirm Verification'}
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={sendingCode}
+                  onClick={handleSendCode}
+                  style={{ fontSize: '12px' }}
+                >
+                  Resend Code
+                </button>
+              </div>
+            </div>
+          )}
+
+          {statusMsg && <p style={{ margin: 0, fontSize: '12px', color: '#059669', fontWeight: 500 }}>{statusMsg}</p>}
+          {statusErr && <p style={{ margin: 0, fontSize: '12px', color: '#dc2626', fontWeight: 500 }}>{statusErr}</p>}
+        </div>
+      )}
+
+      <button type="button" className="button button-secondary" onClick={onSignOut} style={{ marginTop: '8px' }}>
+        Sign out
+      </button>
+    </section>
+  );
 }
 
 export default App;

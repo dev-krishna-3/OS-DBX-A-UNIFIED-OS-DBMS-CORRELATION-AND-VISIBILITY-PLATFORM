@@ -107,3 +107,32 @@ def send_signin_notification(to_email: Optional[str], username: str) -> bool:
     </div>
     """
     return _send_email(to_email, subject, text_body, html_body)
+
+
+def send_email_verification_code(to_email: Optional[str], username: str, code: str) -> bool:
+    """Send an email verification code."""
+    if not to_email:
+        return False
+    subject = f"OS-DBX Verification Code: {code}"
+    text_body = (
+        f"Hello {username},\n\n"
+        f"Your verification code to complete your OS-DBX account registration is: {code}\n\n"
+        "This code will expire in 15 minutes.\n"
+        "If you did not request this, please contact your administrator.\n\n"
+        "— OS-DBX Security"
+    )
+    html_body = f"""
+    <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 540px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 12px;">
+      <h2 style="color: #1f2937; margin-top: 0;">Complete Your Registration</h2>
+      <p style="color: #4b5563; line-height: 1.6;">
+        Hello <strong>{username}</strong>, enter the code below in your account panel to verify your email address and complete registration:
+      </p>
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 8px; margin: 20px 0; text-align: center;">
+        <span style="font-size: 32px; font-weight: 700; letter-spacing: 6px; color: #166534;">{code}</span>
+      </div>
+      <p style="color: #6b7280; font-size: 13px;">
+        This code expires in 15 minutes.
+      </p>
+    </div>
+    """
+    return _send_email(to_email, subject, text_body, html_body)

@@ -6,6 +6,7 @@ export interface AuthUser {
   username: string;
   email: string | null;
   is_admin: boolean;
+  email_verified?: boolean;
   created_at: string;
 }
 
@@ -82,6 +83,14 @@ export const authApi = {
 
   currentUser(): Promise<AuthUser> {
     return apiRequest<AuthUser>('/auth/me');
+  },
+
+  sendVerificationEmail(): Promise<{ success: boolean; message: string; is_simulation?: boolean; demo_code?: string; email_verified?: boolean }> {
+    return postJson('/auth/verify-email/send', {});
+  },
+
+  confirmVerificationEmail(code: string): Promise<{ success: boolean; message: string; email_verified: boolean }> {
+    return postJson('/auth/verify-email/confirm', { code });
   },
 
   signOut(): void {

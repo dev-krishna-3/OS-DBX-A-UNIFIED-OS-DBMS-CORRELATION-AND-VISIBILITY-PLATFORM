@@ -28,9 +28,14 @@ from app.models.users import (
     RegistrationRequestCreate,
     RegistrationRequestOut,
     RegistrationApprovalAction,
+    VerifyEmailConfirmRequest,
 )
 from app.config.settings import settings
-from app.services.email_service import send_signin_notification, send_signup_notification
+from app.services.email_service import (
+    send_signin_notification,
+    send_signup_notification,
+    send_email_verification_code,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -38,6 +43,7 @@ _login_failed_attempts: dict[str, list[float]] = {}
 _rate_limit_lock = threading.Lock()
 
 _memory_registration_requests: dict[str, dict] = {}
+_memory_verification_codes: dict[int, list[dict]] = {}
 
 
 def check_rate_limit(keys: tuple[str, ...], max_attempts: int, window_seconds: int, detail: str = "Too many requests. Try again later.") -> None:
@@ -111,6 +117,36 @@ def ensure_registration_requests_table(connection: mysql.connector.MySQLConnecti
                 KEY idx_reg_req_status (status),
                 KEY idx_reg_req_username (username),
                 KEY idx_reg_req_email (email)
+            )
+            """
+        )
+        connection.commit()
+
+        # Ensure email_verified column exists in users
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE")
+            connection.commit()
+        except Exception:
+            pass
+        try:
+            cursor.execute("UPDATE users SET email_verified = TRUE WHERE username = 'admin'")
+            connection.commit()
+        except Exception:
+            pass
+
+        # Ensure email_verification_codes table exists
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_verification_codes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                code VARCHAR(6) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT FALSE,
+                KEY idx_ev_user (user_id),
+                KEY idx_ev_code (code)
             )
             """
         )
@@ -298,6 +334,7 @@ def approve_registration_request(
             password_hash=req_data["password_hash"],
             created_at=now,
             is_admin=is_admin,
+            email_verified=is_admin,
         )
         auth_mod._memory_users[req_data["username"].casefold()] = new_user
         auth_mod._memory_users[req_data["email"].casefold()] = new_user
@@ -311,17 +348,29 @@ def approve_registration_request(
             try:
                 cur.execute(
                     """
-                    INSERT INTO users (username, email, uid_linux, password_hash, is_admin)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO users (username, email, uid_linux, password_hash, is_admin, email_verified)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (req_data["username"], req_data["email"], uid_linux, req_data["password_hash"], 1 if is_admin else 0)
+                    (req_data["username"], req_data["email"], uid_linux, req_data["password_hash"], 1 if is_admin else 0, 1 if is_admin else 0)
                 )
             except mysql.connector.Error as col_err:
                 if col_err.errno == 1054:
-                    cur.execute(
-                        """
-                        INSERT INTO users (username, uid_linux, password_hash, is_admin)
-                        VALUES (%s, %s, %s, %s)
+                    try:
+                        cur.execute(
+                            """
+                            INSERT INTO users (username, email, uid_linux, password_hash, is_admin)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (req_data["username"], req_data["email"], uid_linux, req_data["password_hash"], 1 if is_admin else 0)
+                        )
+                    except mysql.connector.Error:
+                        cur.execute(
+                            """
+                            INSERT INTO users (username, uid_linux, password_hash, is_admin)
+                            VALUES (%s, %s, %s, %s)
+                            """,
+                            (req_data["username"], uid_linux, req_data["password_hash"], 1 if is_admin else 0)
+                        )
                         """,
                         (req_data["username"], uid_linux, req_data["password_hash"], 1 if is_admin else 0)
                     )
@@ -608,3 +657,109 @@ def read_users_me(
 ) -> Any:
     """Get current user details."""
     return current_user
+
+
+@router.post("/verify-email/send")
+def send_verification_email_endpoint(
+    current_user: UserInDB = Depends(get_current_active_user),
+    connection: Optional[mysql.connector.MySQLConnection] = Depends(get_dbms_connection)
+) -> Any:
+    """Generate and dispatch an email verification code to complete user registration."""
+    if current_user.email_verified:
+        return {"success": True, "message": "Email is already verified.", "email_verified": True}
+
+    if not current_user.email:
+        raise HTTPException(status_code=400, detail="No email address associated with this account.")
+
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+
+    if connection is not None:
+        try:
+            ensure_registration_requests_table(connection)
+            cur = connection.cursor()
+            cur.execute(
+                "INSERT INTO email_verification_codes (user_id, email, code, expires_at, used) VALUES (%s, %s, %s, %s, 0)",
+                (current_user.user_id, current_user.email, code, expires_at)
+            )
+            connection.commit()
+            cur.close()
+        except Exception:
+            codes = _memory_verification_codes.setdefault(current_user.user_id, [])
+            codes.append({"code": code, "email": current_user.email, "expires_at": expires_at, "used": False})
+    else:
+        codes = _memory_verification_codes.setdefault(current_user.user_id, [])
+        codes.append({"code": code, "email": current_user.email, "expires_at": expires_at, "used": False})
+
+    sent = send_email_verification_code(current_user.email, current_user.username, code)
+    if sent:
+        return {
+            "success": True,
+            "is_simulation": False,
+            "message": f"Verification code sent to {current_user.email}. Please check your inbox.",
+        }
+    else:
+        # Fallback simulation for environments without outgoing SMTP configured
+        return {
+            "success": True,
+            "is_simulation": True,
+            "demo_code": code,
+            "message": f"Verification code generated (Simulation mode: {code}). Please enter this code to complete registration.",
+        }
+
+
+@router.post("/verify-email/confirm")
+def confirm_verification_email_endpoint(
+    req: VerifyEmailConfirmRequest,
+    current_user: UserInDB = Depends(get_current_active_user),
+    connection: Optional[mysql.connector.MySQLConnection] = Depends(get_dbms_connection)
+) -> Any:
+    """Validate submitted 6-digit code and mark account email as verified."""
+    entered_code = req.code.strip()
+    now = datetime.now(timezone.utc)
+    verified = False
+
+    if connection is not None:
+        try:
+            ensure_registration_requests_table(connection)
+            cur = connection.cursor(dictionary=True)
+            cur.execute(
+                """
+                SELECT id, code, expires_at, used
+                FROM email_verification_codes
+                WHERE user_id = %s AND code = %s AND used = 0
+                ORDER BY id DESC LIMIT 1
+                """,
+                (current_user.user_id, entered_code)
+            )
+            row = cur.fetchone()
+            if row:
+                exp = row["expires_at"]
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                if exp >= now:
+                    cur.execute("UPDATE email_verification_codes SET used = 1 WHERE id = %s", (row["id"],))
+                    cur.execute("UPDATE users SET email_verified = 1 WHERE user_id = %s", (current_user.user_id,))
+                    connection.commit()
+                    verified = True
+            cur.close()
+        except Exception:
+            pass
+
+    if not verified:
+        mem_codes = _memory_verification_codes.get(current_user.user_id, [])
+        for entry in reversed(mem_codes):
+            if entry["code"] == entered_code and not entry["used"] and entry["expires_at"] >= now:
+                entry["used"] = True
+                current_user.email_verified = True
+                verified = True
+                break
+
+    if not verified:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code. Please request a new code.")
+
+    return {
+        "success": True,
+        "message": "Email verified successfully! Your account registration is now complete.",
+        "email_verified": True
+    }
