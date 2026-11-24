@@ -18,10 +18,12 @@ def is_smtp_configured() -> bool:
     )
 
 
-def _send_email(to_email: str, subject: str, text_body: str, html_body: str) -> bool:
-    """Send an email via SMTP and return True if delivered, False otherwise."""
-    if not to_email or "@" not in to_email or not is_smtp_configured():
-        return False
+def _send_email(to_email: str, subject: str, text_body: str, html_body: str) -> tuple[bool, str]:
+    """Send an email via SMTP (trying SSL port 465, then STARTTLS port 587) and return (success, error_detail)."""
+    if not to_email or "@" not in to_email:
+        return False, "Recipient email address is invalid."
+    if not is_smtp_configured():
+        return False, f"SMTP configuration missing on server (host={settings.smtp_host!r}, user={settings.smtp_username!r}, has_password={bool(settings.smtp_password)})."
 
     from_addr = settings.smtp_from_email or settings.smtp_username
     msg = EmailMessage()
@@ -31,19 +33,34 @@ def _send_email(to_email: str, subject: str, text_body: str, html_body: str) -> 
     msg.set_content(text_body)
     msg.add_alternative(html_body, subtype="html")
 
+    errors = []
+
+    # Attempt 1: Port 465 with direct SSL (often preferred on cloud hosts)
     try:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
+        with smtplib.SMTP_SSL(settings.smtp_host, 465, timeout=10) as server:
+            server.login(settings.smtp_username, settings.smtp_password)
+            server.send_message(msg)
+        return True, ""
+    except Exception as exc1:
+        errors.append(f"Port 465 (SSL): {exc1}")
+
+    # Attempt 2: Port 587 with STARTTLS
+    try:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port or 587, timeout=10) as server:
             server.ehlo()
             if settings.smtp_use_tls:
                 server.starttls()
                 server.ehlo()
             server.login(settings.smtp_username, settings.smtp_password)
             server.send_message(msg)
-        return True
-    except Exception as exc:
-        import logging
-        logging.getLogger("os_dbx.email").error(f"Failed to send email to {to_email}: {exc}")
-        return False
+        return True, ""
+    except Exception as exc2:
+        errors.append(f"Port 587 (TLS): {exc2}")
+
+    err_summary = " | ".join(errors)
+    import logging
+    logging.getLogger("os_dbx.email").error(f"Failed to deliver email to {to_email}: {err_summary}")
+    return False, err_summary
 
 
 def send_signup_notification(to_email: Optional[str], username: str) -> bool:
@@ -76,7 +93,7 @@ def send_signup_notification(to_email: Optional[str], username: str) -> bool:
       </p>
     </div>
     """
-    return _send_email(to_email, subject, text_body, html_body)
+    return _send_email(to_email, subject, text_body, html_body)[0]
 
 
 def send_signin_notification(to_email: Optional[str], username: str) -> bool:
@@ -108,13 +125,13 @@ def send_signin_notification(to_email: Optional[str], username: str) -> bool:
       </p>
     </div>
     """
-    return _send_email(to_email, subject, text_body, html_body)
+    return _send_email(to_email, subject, text_body, html_body)[0]
 
 
-def send_email_verification_code(to_email: Optional[str], username: str, code: str) -> bool:
+def send_email_verification_code(to_email: Optional[str], username: str, code: str) -> tuple[bool, str]:
     """Send an email verification code."""
     if not to_email:
-        return False
+        return False, "No recipient email address associated with account."
     subject = f"OS-DBX Verification Code: {code}"
     text_body = (
         f"Hello {username},\n\n"

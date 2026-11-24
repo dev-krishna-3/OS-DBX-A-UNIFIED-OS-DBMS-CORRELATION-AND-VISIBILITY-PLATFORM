@@ -689,11 +689,11 @@ def send_verification_email_endpoint(
         codes = _memory_verification_codes.setdefault(current_user.user_id, [])
         codes.append({"code": code, "email": current_user.email, "expires_at": expires_at, "used": False})
 
-    sent = send_email_verification_code(current_user.email, current_user.username, code)
+    sent, err_detail = send_email_verification_code(current_user.email, current_user.username, code)
     if not sent:
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to deliver verification code to {current_user.email}. Please ensure SMTP service is reachable.",
+            detail=f"Failed to deliver verification code to {current_user.email}: {err_detail}",
         )
 
     return {
