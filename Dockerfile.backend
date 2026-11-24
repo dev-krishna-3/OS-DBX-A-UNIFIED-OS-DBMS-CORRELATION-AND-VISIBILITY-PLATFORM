@@ -15,14 +15,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend application code and database schema
+# Copy backend application code, OS monitor, and database schema
 COPY backend/app ./app
 COPY backend/scripts ./scripts
 COPY backend/tests ./tests
 COPY database ./database
+COPY os_monitor ./os_monitor
 
 # Set environment defaults
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH="/app:${PYTHONPATH}" \
     ENVIRONMENT=production \
     PORT=8000
 
