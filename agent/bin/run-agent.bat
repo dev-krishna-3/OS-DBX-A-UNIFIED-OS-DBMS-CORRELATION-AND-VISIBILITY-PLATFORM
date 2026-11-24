@@ -7,21 +7,25 @@ echo           OS-DBX Forensic Endpoint Collector
 echo ======================================================================
 echo.
 
-set DEFAULT_SERVER=https://maternal-unlit-probable.ngrok-free.dev
-set /p SERVER_INPUT="Enter Server URL [Press Enter for %DEFAULT_SERVER%]: "
-if "%SERVER_INPUT%"=="" set SERVER_INPUT=%DEFAULT_SERVER%
+set PYTHON_EXEC=python
+if exist "C:\Users\adity\Music\OS-DBX-A-UNIFIED-OS-DBMS-CORRELATION-AND-VISIBILITY-PLATFORM\backend\venv\Scripts\python.exe" (
+    set "PYTHON_EXEC=C:\Users\adity\Music\OS-DBX-A-UNIFIED-OS-DBMS-CORRELATION-AND-VISIBILITY-PLATFORM\backend\venv\Scripts\python.exe"
+)
 
-if not "%SERVER_INPUT:~0,4%"=="http" set SERVER_URL=http://%SERVER_INPUT%
-if "%SERVER_INPUT:~0,4%"=="http" set SERVER_URL=%SERVER_INPUT%
+set SERVER_URL=https://testing-4bux.onrender.com
+set HOST_ID=0cf8e73b-d573-477f-a368-4271f7440450
+set API_TOKEN=8xC_xZOr4QpFe0c0ZV1ZD2nwT03FzbHlME166yPU6ULSqyyDtcJo6mc7gv8ADcXx
 
-set /p HOST_INPUT="Enter Host ID / Computer Name [Press Enter for %COMPUTERNAME%]: "
-if "%HOST_INPUT%"=="" set HOST_INPUT=%COMPUTERNAME%
-
-echo.
 echo [*] Target Server: %SERVER_URL%
-echo [*] Device Host ID: %HOST_INPUT%
-echo [*] Starting collector...
+echo [*] Device Host ID: %HOST_ID%
+echo [*] Starting Python collector...
 echo.
 
-osdbx-agent.exe --server "%SERVER_URL%" --host-id "%HOST_INPUT%"
+if exist "osdbx_agent.py" (
+    "%PYTHON_EXEC%" osdbx_agent.py --server "%SERVER_URL%" --host-id "%HOST_ID%" --token "%API_TOKEN%"
+) else if exist "..\osdbx_agent.py" (
+    "%PYTHON_EXEC%" ..\osdbx_agent.py --server "%SERVER_URL%" --host-id "%HOST_ID%" --token "%API_TOKEN%"
+) else (
+    echo [ERROR] osdbx_agent.py not found!
+)
 pause
