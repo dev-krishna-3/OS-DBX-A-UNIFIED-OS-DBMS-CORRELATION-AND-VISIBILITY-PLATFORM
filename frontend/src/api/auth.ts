@@ -8,6 +8,7 @@ export interface AuthUser {
   is_admin: boolean;
   email_verified?: boolean;
   totp_enabled?: boolean;
+  avatar_url?: string | null;
   created_at: string;
 }
 
@@ -99,6 +100,10 @@ export const authApi = {
 
   currentUser(): Promise<AuthUser> {
     return apiRequest<AuthUser>('/auth/me');
+  },
+
+  updateAvatar(avatar_url: string | null): Promise<AuthUser> {
+    return postJson<AuthUser>('/auth/avatar', { avatar_url });
   },
 
   sendVerificationEmail(): Promise<{ success: boolean; message: string; is_simulation?: boolean; demo_code?: string; email_verified?: boolean }> {

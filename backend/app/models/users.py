@@ -12,6 +12,7 @@ class UserBase(BaseModel):
     is_admin: bool = Field(default=False, description="Admin privilege flag")
     email_verified: bool = Field(default=False, description="Email verification status")
     totp_enabled: bool = Field(default=False, description="Google Authenticator 2FA status")
+    avatar_url: Optional[str] = Field(default=None, description="Profile avatar URL or base64 data URL")
 
 class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=100)
@@ -140,4 +141,9 @@ class TotpLoginVerifyRequest(BaseModel):
 class TotpStatusResponse(BaseModel):
     totp_enabled: bool
     message: str
+
+
+class UserAvatarUpdate(BaseModel):
+    avatar_url: Optional[str] = Field(default=None, max_length=2000000, description="Profile avatar URL or base64 data URL")
+
 

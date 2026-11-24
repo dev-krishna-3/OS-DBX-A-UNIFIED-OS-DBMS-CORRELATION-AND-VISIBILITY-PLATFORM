@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from 'framer-motion';
 import {
-  Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Check, CheckCircle,
+  Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, Camera, Check, CheckCircle,
   ChevronDown, ChevronRight, CircleHelp, Clock3, Contrast, Cpu, Database, FileClock,
   FlaskConical, GitBranch, HardDrive, LayoutDashboard, ListFilter, LockKeyhole,
   MemoryStick, Monitor, Moon, Network, Palette, Pause, Play, QrCode, RefreshCw, RotateCcw, Search, Settings, ShieldAlert, ShieldCheck, Sparkles,
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { events as sampleEvents, observations as sampleObservations, pageMeta, scenarioNames, sidebarGroups, type ActivityEvent, type SectionId } from './data/demo';
 import AuthPage from './features/auth/AuthPage';
+import AvatarPickerModal from './features/profile/AvatarPickerModal';
 import { analysisApi, authApi, correlationApi, hasAccessToken, incidentsApi, observabilityApi, simulationsApi, workflowsApi } from './api';
 import type { AuthUser, RegistrationRequest } from './api/auth';
 import EmptyState from './components/EmptyState';
@@ -960,7 +961,18 @@ function App() {
                 setSyncDropdownOpen(false);
               }}
             >
-              <span className="profile-avatar" aria-hidden="true" /> {currentUser.username}
+              {currentUser.avatar_url || localStorage.getItem(`osdbx_avatar_${currentUser.username}`) ? (
+                <img
+                  src={currentUser.avatar_url || localStorage.getItem(`osdbx_avatar_${currentUser.username}`) || ''}
+                  alt={currentUser.username}
+                  className="profile-avatar"
+                  style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }}
+                />
+              ) : (
+                <span className="profile-avatar" aria-hidden="true" style={{ display: 'grid', placeItems: 'center', fontSize: '11px', fontWeight: 700 }}>
+                  {currentUser.username.slice(0, 2).toUpperCase()}
+                </span>
+              )} {currentUser.username}
             </button>
           </div>
           </div>
@@ -5353,6 +5365,7 @@ function AccountProfileModal({
   onUserUpdated: (u: AuthUser) => void;
   onNotify: (msg: string) => void;
 }) {
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [code, setCode] = useState('');
@@ -5488,15 +5501,94 @@ function AccountProfileModal({
           </button>
         </div>
 
-        <div className="account-profile" style={{ margin: '8px 0 16px' }}>
-          <div className="account-avatar" style={{ width: '48px', height: '48px', fontSize: '16px' }}>
-            {user.username.slice(0, 2).toUpperCase()}
+        <div className="account-profile" style={{ margin: '8px 0 16px', display: 'flex', alignItems: 'center' }}>
+          <div style={{ position: 'relative' }}>
+            <div
+              className="account-avatar"
+              style={{
+                width: '56px',
+                height: '56px',
+                fontSize: '18px',
+                borderRadius: '50%',
+                overflow: 'hidden',
+                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                color: '#ffffff',
+                fontWeight: 800,
+                boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
+                cursor: 'pointer',
+                display: 'grid',
+                placeItems: 'center',
+              }}
+              onClick={() => setAvatarPickerOpen(true)}
+              title="Click to change profile picture"
+            >
+              {user.avatar_url || localStorage.getItem(`osdbx_avatar_${user.username}`) ? (
+                <img
+                  src={user.avatar_url || localStorage.getItem(`osdbx_avatar_${user.username}`) || ''}
+                  alt={user.username}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                user.username.slice(0, 2).toUpperCase()
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setAvatarPickerOpen(true)}
+              aria-label="Change profile picture"
+              style={{
+                position: 'absolute',
+                bottom: '-2px',
+                right: '-2px',
+                width: '22px',
+                height: '22px',
+                borderRadius: '50%',
+                background: 'var(--color-primary, #6366f1)',
+                border: '2px solid #ffffff',
+                color: '#ffffff',
+                display: 'grid',
+                placeItems: 'center',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+              title="Change profile picture"
+            >
+              <Camera size={11} strokeWidth={2.5} />
+            </button>
           </div>
-          <div style={{ marginLeft: '12px' }}>
-            <strong style={{ fontSize: '16px', color: 'var(--color-ink)' }}>{user.username}</strong>
+          <div style={{ marginLeft: '14px', flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <strong style={{ fontSize: '16px', color: 'var(--color-ink)' }}>{user.username}</strong>
+              <button
+                type="button"
+                onClick={() => setAvatarPickerOpen(true)}
+                style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-rule, #cbd5e1)',
+                  background: 'var(--color-paper-2, #f8fafc)',
+                  color: 'var(--color-primary, #6366f1)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Change Avatar
+              </button>
+            </div>
             <small style={{ color: 'var(--color-ink-2)', fontSize: '13px' }}>{user.email ?? 'No email address registered'}</small>
           </div>
         </div>
+
+        <AvatarPickerModal
+          user={user}
+          isOpen={avatarPickerOpen}
+          onClose={() => setAvatarPickerOpen(false)}
+          onAvatarUpdated={(updated) => {
+            onUserUpdated(updated);
+            onNotify('Profile picture updated successfully!');
+          }}
+        />
 
         <div className="inspector-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
           <div className="inspector-stat">
@@ -5782,6 +5874,7 @@ function AccountSettings({
   onUserUpdated?: (u: AuthUser) => void;
   onAction?: (msg: string) => void;
 }) {
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
   const [verifyingCode, setVerifyingCode] = useState(false);
   const [code, setCode] = useState('');
@@ -5840,13 +5933,94 @@ function AccountSettings({
         <span className="event-tag tag-lavender">{user.is_admin ? 'Administrator' : 'Member'}</span>
       </div>
 
-      <div className="account-profile">
-        <div className="account-avatar">{user.username.slice(0, 2).toUpperCase()}</div>
-        <div>
-          <strong>{user.username}</strong>
+      <div className="account-profile" style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ position: 'relative' }}>
+          <div
+            className="account-avatar"
+            style={{
+              width: '56px',
+              height: '56px',
+              fontSize: '18px',
+              borderRadius: '50%',
+              overflow: 'hidden',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              color: '#ffffff',
+              fontWeight: 800,
+              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
+              cursor: 'pointer',
+              display: 'grid',
+              placeItems: 'center',
+            }}
+            onClick={() => setAvatarPickerOpen(true)}
+            title="Click to change profile picture"
+          >
+            {user.avatar_url || localStorage.getItem(`osdbx_avatar_${user.username}`) ? (
+              <img
+                src={user.avatar_url || localStorage.getItem(`osdbx_avatar_${user.username}`) || ''}
+                alt={user.username}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              user.username.slice(0, 2).toUpperCase()
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setAvatarPickerOpen(true)}
+            aria-label="Change profile picture"
+            style={{
+              position: 'absolute',
+              bottom: '-2px',
+              right: '-2px',
+              width: '22px',
+              height: '22px',
+              borderRadius: '50%',
+              background: 'var(--color-primary, #6366f1)',
+              border: '2px solid #ffffff',
+              color: '#ffffff',
+              display: 'grid',
+              placeItems: 'center',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+            title="Change profile picture"
+          >
+            <Camera size={11} strokeWidth={2.5} />
+          </button>
+        </div>
+        <div style={{ marginLeft: '14px', flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <strong style={{ fontSize: '15px' }}>{user.username}</strong>
+            <button
+              type="button"
+              onClick={() => setAvatarPickerOpen(true)}
+              style={{
+                fontSize: '11px',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                border: '1px solid var(--color-rule, #cbd5e1)',
+                background: 'var(--color-paper-2, #f8fafc)',
+                color: 'var(--color-primary, #6366f1)',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Change Avatar
+            </button>
+          </div>
           <small>{user.email ?? 'No email registered'}</small>
         </div>
       </div>
+
+      <AvatarPickerModal
+        user={user}
+        isOpen={avatarPickerOpen}
+        onClose={() => setAvatarPickerOpen(false)}
+        onAvatarUpdated={(updated) => {
+          if (onUserUpdated) onUserUpdated(updated);
+          if (onAction) onAction('Profile picture updated successfully!');
+        }}
+      />
 
       <div className="health-facts">
         <span>Username <b>{user.username}</b></span>

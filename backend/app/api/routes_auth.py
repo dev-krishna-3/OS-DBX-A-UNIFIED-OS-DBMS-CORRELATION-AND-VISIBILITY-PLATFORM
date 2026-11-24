@@ -42,6 +42,7 @@ from app.models.users import (
     TotpVerifyRequest,
     TotpLoginVerifyRequest,
     TotpStatusResponse,
+    UserAvatarUpdate,
 )
 from app.config.settings import settings
 from app.services.email_service import (
@@ -185,6 +186,13 @@ def ensure_registration_requests_table(connection: mysql.connector.MySQLConnecti
             pass
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(255) DEFAULT NULL")
+            connection.commit()
+        except Exception:
+            pass
+
+        # Ensure avatar_url column exists in users
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN avatar_url MEDIUMTEXT DEFAULT NULL")
             connection.commit()
         except Exception:
             pass
@@ -725,6 +733,40 @@ def read_users_me(
     current_user: UserInDB = Depends(get_current_active_user)
 ) -> Any:
     """Get current user details."""
+    return current_user
+
+
+@router.post("/avatar", response_model=UserOut)
+def update_user_avatar(
+    req: UserAvatarUpdate,
+    current_user: UserInDB = Depends(get_current_active_user),
+    connection: Optional[mysql.connector.MySQLConnection] = Depends(get_dbms_connection)
+) -> Any:
+    """Update profile picture or cartoon avatar for the current user."""
+    current_user.avatar_url = req.avatar_url
+    try:
+        from app.core.auth import _memory_users
+        uname = current_user.username.casefold()
+        if uname in _memory_users:
+            _memory_users[uname].avatar_url = req.avatar_url
+        if current_user.email:
+            _memory_users[current_user.email.casefold()].avatar_url = req.avatar_url
+    except Exception:
+        pass
+
+    if connection is not None:
+        try:
+            ensure_registration_requests_table(connection)
+            cur = connection.cursor()
+            cur.execute(
+                "UPDATE users SET avatar_url = %s WHERE user_id = %s",
+                (req.avatar_url, current_user.user_id)
+            )
+            connection.commit()
+            cur.close()
+        except Exception:
+            pass
+
     return current_user
 
 

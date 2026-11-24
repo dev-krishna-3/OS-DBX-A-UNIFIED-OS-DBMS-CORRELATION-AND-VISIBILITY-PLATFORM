@@ -97,42 +97,42 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
     except Exception:
         return _memory_users.get(uname)
 
+    query_candidates = [
+        # Full query with all modern columns
+        "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
+        "COALESCE(email_verified, 0) as email_verified, "
+        "COALESCE(totp_enabled, 0) as totp_enabled, "
+        "totp_secret, avatar_url "
+        "FROM users WHERE username = %s OR email = %s LIMIT 1",
+        # Without avatar_url
+        "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
+        "COALESCE(email_verified, 0) as email_verified, "
+        "COALESCE(totp_enabled, 0) as totp_enabled, "
+        "totp_secret "
+        "FROM users WHERE username = %s OR email = %s LIMIT 1",
+        # Without totp_secret
+        "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
+        "COALESCE(email_verified, 0) as email_verified, "
+        "COALESCE(totp_enabled, 0) as totp_enabled "
+        "FROM users WHERE username = %s OR email = %s LIMIT 1",
+        # Legacy without verification flags
+        "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin "
+        "FROM users WHERE username = %s OR email = %s LIMIT 1",
+        # Minimum columns
+        "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin "
+        "FROM users WHERE username = %s LIMIT 1",
+    ]
+
+    user_dict = None
     try:
-        try:
-            cursor.execute(
-                "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
-                "COALESCE(email_verified, 0) as email_verified, "
-                "COALESCE(totp_enabled, 0) as totp_enabled, "
-                "totp_secret "
-                "FROM users WHERE username = %s OR email = %s LIMIT 1",
-                (username, username)
-            )
-            user_dict = cursor.fetchone()
-        except Exception:
+        for q in query_candidates:
             try:
-                cursor.execute(
-                    "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin, "
-                    "COALESCE(email_verified, 0) as email_verified, "
-                    "COALESCE(totp_enabled, 0) as totp_enabled "
-                    "FROM users WHERE username = %s OR email = %s LIMIT 1",
-                    (username, username)
-                )
+                params = (username, username) if "%s OR email = %s" in q else (username,)
+                cursor.execute(q, params)
                 user_dict = cursor.fetchone()
+                break
             except Exception:
-                try:
-                    cursor.execute(
-                        "SELECT user_id, username, email, uid_linux, password_hash, created_at, is_admin "
-                        "FROM users WHERE username = %s OR email = %s LIMIT 1",
-                        (username, username)
-                    )
-                    user_dict = cursor.fetchone()
-                except Exception:
-                    cursor.execute(
-                        "SELECT user_id, username, uid_linux, password_hash, created_at, is_admin "
-                        "FROM users WHERE username = %s LIMIT 1",
-                        (username,)
-                    )
-                    user_dict = cursor.fetchone()
+                continue
     except Exception:
         user_dict = None
     finally:
@@ -154,6 +154,7 @@ def get_user_by_username(connection: Optional[mysql.connector.MySQLConnection], 
             user_dict["email_verified"] = bool(user_dict.get("email_verified", False))
         user_dict["totp_enabled"] = bool(user_dict.get("totp_enabled", False))
         user_dict["totp_secret"] = user_dict.get("totp_secret")
+        user_dict["avatar_url"] = user_dict.get("avatar_url")
 
         return UserInDB(**user_dict)
     return _memory_users.get(uname)
