@@ -1,14 +1,99 @@
-CREATE DATABASE IF NOT EXISTS os_dbx;
 
-USE os_dbx;
 
 # USER TABLE CREATED BY "KRISHNA NITIN ANASANE"
 CREATE TABLE users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) NOT NULL UNIQUE,
+    email VARCHAR(255) NULL UNIQUE,
     uid_linux BIGINT NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NULL,
+    is_admin BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+# WORKSPACES AND DEVICE ACCESS CONTROL
+CREATE TABLE workspaces (
+    workspace_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    is_legacy BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_workspace_creator FOREIGN KEY (created_by) REFERENCES users(user_id)
+);
+
+CREATE TABLE workspace_memberships (
+    workspace_id BIGINT NOT NULL,
+    user_id INT NOT NULL,
+    role ENUM('owner', 'inspector') NOT NULL,
+    invited_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (workspace_id, user_id),
+    CONSTRAINT fk_membership_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+    CONSTRAINT fk_membership_user FOREIGN KEY (user_id) REFERENCES users(user_id),
+    CONSTRAINT fk_membership_inviter FOREIGN KEY (invited_by) REFERENCES users(user_id)
+);
+
+CREATE TABLE workspace_invitations (
+    invitation_id CHAR(36) PRIMARY KEY,
+    workspace_id BIGINT NOT NULL,
+    invited_user_id INT NOT NULL,
+    invited_by INT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    expires_at DATETIME(6) NOT NULL,
+    accepted_at DATETIME(6) NULL,
+    revoked_at DATETIME(6) NULL,
+    KEY idx_workspace_invited_user (workspace_id, invited_user_id, accepted_at, revoked_at),
+    CONSTRAINT fk_invitation_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+    CONSTRAINT fk_invitation_user FOREIGN KEY (invited_user_id) REFERENCES users(user_id),
+    CONSTRAINT fk_invitation_actor FOREIGN KEY (invited_by) REFERENCES users(user_id)
+);
+
+CREATE TABLE devices (
+    device_id CHAR(36) PRIMARY KEY,
+    workspace_id BIGINT NOT NULL,
+    host_id VARCHAR(255) NOT NULL,
+    display_name VARCHAR(150) NOT NULL,
+    operating_system VARCHAR(32) NOT NULL,
+    collection_scope JSON NOT NULL,
+    retention_days SMALLINT UNSIGNED NOT NULL,
+    status ENUM('pending', 'online', 'degraded', 'offline', 'revoked', 'unhealthy') NOT NULL DEFAULT 'pending',
+    last_heartbeat_at DATETIME(6) NULL,
+    last_event_at DATETIME(6) NULL,
+    enrolled_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    revoked_at DATETIME(6) NULL,
+    CONSTRAINT fk_device_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+    UNIQUE KEY uq_device_workspace_host (workspace_id, host_id),
+    KEY idx_device_workspace_status (workspace_id, status)
+);
+
+CREATE TABLE device_credentials (
+    credential_id CHAR(36) PRIMARY KEY,
+    device_id CHAR(36) NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    expires_at DATETIME(6) NULL,
+    revoked_at DATETIME(6) NULL,
+    CONSTRAINT fk_credential_device FOREIGN KEY (device_id) REFERENCES devices(device_id),
+    KEY idx_credential_device_active (device_id, revoked_at, expires_at)
+);
+
+CREATE TABLE device_access_grants (
+    workspace_id BIGINT NOT NULL,
+    device_id CHAR(36) NOT NULL,
+    user_id INT NOT NULL,
+    can_export BOOLEAN NOT NULL DEFAULT FALSE,
+    granted_by INT NOT NULL,
+    expires_at DATETIME(6) NULL,
+    revoked_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (device_id, user_id),
+    CONSTRAINT fk_grant_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),
+    CONSTRAINT fk_grant_device FOREIGN KEY (device_id) REFERENCES devices(device_id),
+    CONSTRAINT fk_grant_user FOREIGN KEY (user_id) REFERENCES users(user_id),
+    CONSTRAINT fk_grant_actor FOREIGN KEY (granted_by) REFERENCES users(user_id),
+    KEY idx_grant_user_active (user_id, revoked_at, expires_at)
+);
+
 
 
 # PROCESS TABLE CREATED BY "KRISHNA NITIN ANASANE"
@@ -34,9 +119,12 @@ CREATE TABLE processes (
 CREATE TABLE threads (
     thread_id BIGINT AUTO_INCREMENT PRIMARY KEY,
     process_id BIGINT NOT NULL,
-    tid BIGINT NOT NULL UNIQUE,
+    tid BIGINT NOT NULL,
     state VARCHAR(50),
     created_at DATETIME,
+
+    CONSTRAINT uq_thread_process_tid
+        UNIQUE (process_id, tid),
 
     CONSTRAINT fk_thread_process
         FOREIGN KEY (process_id)
@@ -46,7 +134,7 @@ CREATE TABLE threads (
 #SYSTEM_CALLS TABLE CREATED BY "KRISHNA NITIN ANASANE"
 CREATE TABLE system_calls (
     syscall_id INT AUTO_INCREMENT PRIMARY KEY,
-    process_id INT NOT NULL,
+    process_id BIGINT NOT NULL,
     syscall_name VARCHAR(100) NOT NULL,
     arguments TEXT,
     return_value VARCHAR(255),
@@ -65,9 +153,7 @@ ON system_calls(timestamp);
 #OS_EVENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
 CREATE TABLE os_events (
     event_id INT AUTO_INCREMENT PRIMARY KEY,
-    pid INT NOT NULL,
-    ppid INT,
-    user VARCHAR(255),
+    pid INT NULL,
     event_type VARCHAR(100) NOT NULL,
     file_path VARCHAR(1000),
     timestamp DATETIME,
@@ -77,7 +163,7 @@ CREATE TABLE os_events (
 #RESOURCE_METRICS TABLE CREATED BY "KRISHNA NITIN ANASANE"
 CREATE TABLE resource_metrics (
     metric_id INT AUTO_INCREMENT PRIMARY KEY,
-    process_id INT NOT NULL,
+    process_id BIGINT NOT NULL,
     cpu_usage FLOAT,
     memory_usage FLOAT,
     disk_io FLOAT,
@@ -96,7 +182,13 @@ CREATE TABLE files (
     file_path VARCHAR(1000),
     owner_id INT,
     permissions VARCHAR(20),
-    size_bytes BIGINT
+    size_bytes BIGINT,
+
+    UNIQUE INDEX uq_files_path (file_path(255)),
+
+    CONSTRAINT fk_file_owner
+        FOREIGN KEY (owner_id)
+        REFERENCES users(user_id)
 );
 
 #DIRECTORIES TABLE CREATED BY "KRISHNA NITIN ANASANE"
@@ -104,6 +196,8 @@ CREATE TABLE directories (
     directory_id INT AUTO_INCREMENT PRIMARY KEY,
     path VARCHAR(1000),
     parent_directory_id INT,
+
+    UNIQUE INDEX uq_directories_path (path(255)),
 
     CONSTRAINT fk_directory_parent
         FOREIGN KEY (parent_directory_id)
@@ -116,5 +210,344 @@ CREATE TABLE permissions (
     file_id INT NOT NULL,
     user_id INT NOT NULL,
     access_type VARCHAR(20),
-    granted_at DATETIME
+    granted_at DATETIME,
+
+    CONSTRAINT fk_permission_file
+        FOREIGN KEY (file_id)
+        REFERENCES files(file_id),
+
+    CONSTRAINT fk_permission_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(user_id)
 );
+
+#SIMULATION TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE simulations (
+    simulation_id INT AUTO_INCREMENT PRIMARY KEY,
+    type VARCHAR(100),
+    algorithm VARCHAR(100),
+    created_by INT,
+    created_at DATETIME,
+    status VARCHAR(50),
+    CONSTRAINT fk_simulations_created_by
+        FOREIGN KEY (created_by)
+        REFERENCES users(user_id)
+);
+
+#SCHEDULED_PROCESSES TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE scheduled_processes (
+    sp_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    process_label VARCHAR(50),
+    arrival_time INT,
+    burst_time INT,
+    priority INT,
+    waiting_time INT,
+    turnaround_time INT,
+    completion_time INT,
+
+    CONSTRAINT fk_scheduled_process_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+#MEMORY_EXPERIMENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE memory_experiments (
+    experiment_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    algorithm VARCHAR(100),
+    frame_count INT,
+    result_summary TEXT,
+
+    CONSTRAINT fk_memory_experiment_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+#PAGE_REFERENCES TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE page_references (
+    page_ref_id INT AUTO_INCREMENT PRIMARY KEY,
+    experiment_id INT NOT NULL,
+    page_number INT,
+    sequence_order INT,
+    fault_occurred BOOLEAN,
+
+    CONSTRAINT fk_page_reference_experiment
+        FOREIGN KEY (experiment_id)
+        REFERENCES memory_experiments(experiment_id)
+);
+
+#DISK_REQUESTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE disk_requests (
+    request_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    track_number INT,
+    sequence_order INT,
+    seek_time INT,
+
+    CONSTRAINT fk_disk_request_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+#DEADLOCK_EXPERIMENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE deadlock_experiments (
+    deadlock_exp_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    algorithm VARCHAR(100),
+    deadlock_detected BOOLEAN,
+    cycle_path TEXT,
+
+    CONSTRAINT fk_deadlock_experiment_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+#SYNCHRONIZATION_EXPERIMENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE synchronization_experiments (
+    sync_exp_id INT AUTO_INCREMENT PRIMARY KEY,
+    simulation_id INT NOT NULL,
+    problem_type VARCHAR(100),
+    result_log TEXT,
+
+    CONSTRAINT fk_sync_experiment_simulation
+        FOREIGN KEY (simulation_id)
+        REFERENCES simulations(simulation_id)
+);
+
+
+#TRANSACTIONS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE transactions (
+    transaction_id INT AUTO_INCREMENT PRIMARY KEY,
+    pid BIGINT NOT NULL,
+    status VARCHAR(50),
+    start_time DATETIME,
+    end_time DATETIME,
+    isolation_level VARCHAR(100),
+
+    CONSTRAINT fk_transaction_process
+        FOREIGN KEY (pid)
+        REFERENCES processes(pid)
+);
+
+#TRANSACTION_OPERATIONS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE transaction_operations (
+    operation_id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT NOT NULL,
+    operation_type VARCHAR(50),
+    data_item VARCHAR(255),
+    sequence_no INT,
+    timestamp DATETIME,
+
+    CONSTRAINT fk_transaction_operation_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id)
+);
+
+#QUERY_EXECUTION TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE query_executions (
+    query_id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT NOT NULL,
+    pid BIGINT NOT NULL,
+    query_type VARCHAR(50),
+    query_text TEXT,
+    execution_time_ms FLOAT,
+    rows_affected INT,
+    status VARCHAR(50),
+    timestamp DATETIME,
+
+    CONSTRAINT fk_query_execution_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id),
+
+    CONSTRAINT fk_query_execution_process
+        FOREIGN KEY (pid)
+        REFERENCES processes(pid)
+);
+
+#LOCKS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE locks (
+    lock_id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT NOT NULL,
+    data_item VARCHAR(255),
+    lock_type VARCHAR(50),
+    status VARCHAR(50),
+    acquired_at DATETIME,
+    released_at DATETIME,
+
+    CONSTRAINT fk_lock_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id)
+);
+
+#SCHEDULES TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE schedules (
+    schedule_id INT AUTO_INCREMENT PRIMARY KEY,
+    description TEXT,
+    is_serializable BOOLEAN,
+    created_at DATETIME
+);
+
+#SCHEDULE_OPERATIONS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE schedule_operations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    schedule_id INT,
+    operation_id INT,
+    position INT
+);
+
+#RECOVERY_LOGS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE recovery_logs (
+    log_id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT,
+    log_type VARCHAR(50),
+    data_item VARCHAR(255),
+    old_value VARCHAR(1000),
+    new_value VARCHAR(1000),
+    timestamp DATETIME,
+
+    CONSTRAINT fk_recovery_log_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id)
+);
+
+#CHECKPOINTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE checkpoints (
+    checkpoint_id INT AUTO_INCREMENT PRIMARY KEY,
+    timestamp DATETIME,
+    active_transactions TEXT
+);
+
+#CROSS_LAYER_TRACES TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE cross_layer_traces (
+    trace_id INT AUTO_INCREMENT PRIMARY KEY,
+    pid BIGINT,
+    transaction_id INT,
+    status VARCHAR(50),
+    started_at DATETIME,
+    ended_at DATETIME,
+    summary TEXT,
+
+    CONSTRAINT fk_trace_process
+        FOREIGN KEY (pid)
+        REFERENCES processes(pid),
+
+    CONSTRAINT fk_trace_transaction
+        FOREIGN KEY (transaction_id)
+        REFERENCES transactions(transaction_id)
+);
+
+#EVENT_CORRELATIONS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE event_correlations (
+    correlation_id INT AUTO_INCREMENT PRIMARY KEY,
+    trace_id INT,
+    os_event_id INT,
+    db_event_id INT,
+    query_id INT,
+    correlation_method VARCHAR(100),
+    confidence_score FLOAT,
+    sequence_order INT,
+
+    CONSTRAINT fk_correlation_trace
+        FOREIGN KEY (trace_id)
+        REFERENCES cross_layer_traces(trace_id),
+
+    CONSTRAINT fk_correlation_os_event
+        FOREIGN KEY (os_event_id)
+        REFERENCES os_events(event_id),
+
+    CONSTRAINT fk_correlation_query
+        FOREIGN KEY (query_id)
+        REFERENCES query_executions(query_id)
+);
+
+#INCIDENTS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE incidents (
+    incident_id INT AUTO_INCREMENT PRIMARY KEY,
+    trace_id INT,
+    incident_type VARCHAR(100),
+    description TEXT,
+    severity VARCHAR(20) DEFAULT 'MEDIUM',
+    evidence JSON,
+    detected_at DATETIME,
+    resolved BOOLEAN,
+
+    CONSTRAINT fk_incident_trace
+        FOREIGN KEY (trace_id)
+        REFERENCES cross_layer_traces(trace_id)
+);
+
+#PERFORMANCE_RECORDS TABLE CREATED BY "KRISHNA NITIN ANASANE"
+CREATE TABLE performance_records (
+    record_id INT AUTO_INCREMENT PRIMARY KEY,
+    trace_id INT,
+    metric_name VARCHAR(100),
+    metric_value FLOAT,
+    data_source VARCHAR(50) DEFAULT 'SIMULATION',
+    recorded_at DATETIME,
+
+    CONSTRAINT fk_performance_record_trace
+        FOREIGN KEY (trace_id)
+        REFERENCES cross_layer_traces(trace_id)
+);
+
+# DBMS_QUERY_OBSERVATIONS stores completed statements collected from MySQL
+# Performance Schema before optional OS/transaction correlation.
+CREATE TABLE dbms_query_observations (
+    observation_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source_thread_id BIGINT NOT NULL,
+    source_event_id BIGINT NOT NULL,
+    connection_id BIGINT NULL,
+    processlist_user VARCHAR(255),
+    database_name VARCHAR(255),
+    query_type VARCHAR(50) NOT NULL,
+    query_text TEXT NOT NULL,
+    execution_time_ms FLOAT NOT NULL,
+    rows_affected BIGINT NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    observed_at DATETIME NOT NULL,
+
+    CONSTRAINT uq_dbms_query_source
+        UNIQUE (source_thread_id, source_event_id)
+);
+
+# INCIDENT_REPLAYS stores deterministic investigation replays.
+CREATE TABLE incident_replays (
+    replay_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    incident_id INT NOT NULL,
+    replayed_at DATETIME NOT NULL,
+    outcome VARCHAR(50) NOT NULL,
+    steps_json LONGTEXT NOT NULL,
+    summary TEXT,
+
+    CONSTRAINT fk_replay_incident
+        FOREIGN KEY (incident_id)
+        REFERENCES incidents(incident_id)
+);
+
+# WHAT_IF_SCENARIOS stores schedule and recovery scenario inputs/results.
+CREATE TABLE what_if_scenarios (
+    scenario_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    analysis_type VARCHAR(50) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    input_json LONGTEXT NOT NULL,
+    result_json LONGTEXT NOT NULL,
+    created_at DATETIME NOT NULL
+);
+
+# AUDIT_LOGS stores security and operational audit trails.
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    username VARCHAR(100) NOT NULL,
+    action VARCHAR(255) NOT NULL,
+    details TEXT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+# PERFORMANCE OPTIMIZATION INDEXES
+CREATE INDEX idx_os_events_pid_ts ON os_events(pid, timestamp);
+CREATE INDEX idx_qe_type_text_ts ON query_executions(query_type, timestamp);
+CREATE INDEX idx_incidents_type_resolved ON incidents(incident_type, resolved);
+
+

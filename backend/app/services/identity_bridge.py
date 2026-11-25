@@ -1,0 +1,155 @@
+"""Real-Time OS-DBMS Identity Bridge Service.
+
+Maps live OS processes to MySQL connections by matching OS network sockets 
+to MySQL information_schema.processlist client ports.
+"""
+import psutil
+import mysql.connector
+
+class IdentityBridgeService:
+    _recent_conn_to_pid: dict[int, int] = {}
+
+    def __init__(self, host="localhost", user="root", password="", database="information_schema", port=3306):
+        self.host = host
+        self.port = port
+        self.user = user
+        self.password = password
+        self.database = database
+        self.has_access_denied = False
+
+    def _get_mysql_connection(self):
+        from app.config.database import get_connection
+        return get_connection()
+
+    def is_admin_mode(self) -> bool:
+        """Check if process has Administrator privileges on Windows / root on Linux."""
+        import os
+        if os.name == 'nt':
+            try:
+                import ctypes
+                return ctypes.windll.shell32.IsUserAnAdmin() != 0
+            except Exception:
+                return False
+        return os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+
+    def _get_ports_from_netstat(self, mysql_port: int = 3306) -> dict[int, int]:
+        """Extract client port -> PID mappings on Windows using netstat without requiring admin elevation."""
+        import subprocess
+        import re
+        client_ports = {}
+        try:
+            output = subprocess.check_output(
+                ["netstat", "-ano", "-p", "tcp"],
+                universal_newlines=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                timeout=5
+            )
+            pattern = re.compile(
+                rf'^\s*TCP\s+\S+:(\d+)\s+\S+:{mysql_port}\s+ESTABLISHED\s+(\d+)',
+                re.IGNORECASE | re.MULTILINE
+            )
+            for port_str, pid_str in pattern.findall(output):
+                client_ports[int(port_str)] = int(pid_str)
+        except Exception:
+            pass
+        return client_ports
+
+    def get_os_client_ports(self) -> dict[int, int]:
+        """Returns a dict mapping local client ports to their owning OS PID."""
+        import os
+        client_ports = {}
+        self.has_access_denied = False
+
+        # On Windows, netstat -ano -p tcp works in unprivileged prompts and
+        # captures ALL sockets including SYSTEM and other users without AccessDenied.
+        if os.name == 'nt':
+            netstat_ports = self._get_ports_from_netstat(mysql_port=self.port)
+            if netstat_ports:
+                client_ports.update(netstat_ports)
+
+        try:
+            for conn in psutil.net_connections(kind='tcp'):
+                # Check if it's connected to MySQL port
+                if conn.raddr and len(conn.raddr) == 2 and conn.raddr.port == self.port:
+                    if conn.status == 'ESTABLISHED' and conn.pid:
+                        client_ports[conn.laddr.port] = conn.pid
+        except psutil.AccessDenied:
+            # Only flag access denied if unprivileged netstat also failed to get ports
+            if not client_ports:
+                self.has_access_denied = True
+        except Exception:
+            pass
+
+        return client_ports
+
+    def build_pid_to_connection_map(self) -> dict[int, int]:
+        """Builds a map of OS PID -> MySQL PROCESSLIST_ID."""
+        conn = None
+        try:
+            conn = self._get_mysql_connection()
+        except Exception:
+            return {}
+        client_ports = self.get_os_client_ports()
+        pid_map: dict[int, int] = {}
+        try:
+            cursor = conn.cursor(dictionary=True)
+            my_conn_id = getattr(conn, "connection_id", None)
+            cursor.execute("SELECT ID, HOST FROM information_schema.processlist WHERE HOST IS NOT NULL")
+            rows = cursor.fetchall()
+            
+            for row in rows:
+                processlist_id = row['ID']
+                if my_conn_id and processlist_id == my_conn_id:
+                    continue
+                host_str = row['HOST']
+                if host_str and ':' in host_str:
+                    port_str = host_str.split(':')[-1]
+                    if port_str.isdigit():
+                        port = int(port_str)
+                        if port in client_ports:
+                            pid = client_ports[port]
+                            pid_map[pid] = processlist_id
+                            self._recent_conn_to_pid[int(processlist_id)] = int(pid)
+
+            # Supplement with performance_schema.session_connect_attrs (_pid)
+            try:
+                cursor.execute(
+                    """
+                    SELECT PROCESSLIST_ID, ATTR_VALUE
+                    FROM performance_schema.session_connect_attrs
+                    WHERE ATTR_NAME = '_pid' AND ATTR_VALUE IS NOT NULL
+                    """
+                )
+                for sca_row in cursor.fetchall():
+                    pl_id = int(sca_row["PROCESSLIST_ID"])
+                    if my_conn_id and pl_id == my_conn_id:
+                        continue
+                    val = str(sca_row["ATTR_VALUE"]).strip()
+                    if val.isdigit():
+                        c_pid = int(val)
+                        if psutil.pid_exists(c_pid):
+                            pid_map.setdefault(c_pid, pl_id)
+                            self._recent_conn_to_pid[pl_id] = c_pid
+            except Exception:
+                pass
+
+            if len(self._recent_conn_to_pid) > 2000:
+                self._recent_conn_to_pid.clear()
+        except Exception as e:
+            print(f"IdentityBridge error: {e}")
+        finally:
+            if conn:
+                conn.close()
+                
+        return pid_map
+        
+    def get_pid_for_connection(self, processlist_id: int) -> int | None:
+        """Reverse lookup: Find which OS PID owns a given MySQL connection ID."""
+        pid_map = self.build_pid_to_connection_map()
+        for pid, conn_id in pid_map.items():
+            if conn_id == processlist_id:
+                return pid
+        cached_pid = self._recent_conn_to_pid.get(int(processlist_id))
+        if cached_pid and psutil.pid_exists(cached_pid):
+            return cached_pid
+        return None

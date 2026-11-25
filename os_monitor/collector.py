@@ -10,8 +10,14 @@ contract agreed with the DBMS side:
         "ppid": ...,
         "user": "...",
         "event_type": "process_created" | "process_terminated",
-        "file_path": "..." (executable path, if available)
+        "file_path": "..." (executable path, if available),
+        "state": "..." (e.g. "running", "sleeping", "zombie")
     }
+
+Note on "state" for process_terminated events: this reflects the
+process's last observed status before it disappeared from the process
+table, not a literal "terminated" status - psutil has no way to
+inspect a process that no longer exists.
 
 This runs standalone for now - no FastAPI or MySQL dependency - so it
 can be built and tested independently. Later, `emit_event()` can be
@@ -36,7 +42,7 @@ def now_iso() -> str:
 def snapshot_processes() -> dict:
     """Return {pid: process_info_dict} for all currently running processes."""
     snapshot = {}
-    for proc in psutil.process_iter(["pid", "ppid", "name", "username", "exe"]):
+    for proc in psutil.process_iter(["pid", "ppid", "name", "username", "exe", "status"]):
         try:
             info = proc.info
             snapshot[info["pid"]] = {
@@ -44,6 +50,7 @@ def snapshot_processes() -> dict:
                 "name": info.get("name"),
                 "user": info.get("username"),
                 "file_path": info.get("exe") or None,
+                "state": info.get("status"),
             }
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             # Process may have exited mid-scan, or we lack permission to inspect it.
@@ -59,6 +66,7 @@ def build_event(pid: int, info: dict, event_type: str) -> dict:
         "user": info.get("user"),
         "event_type": event_type,
         "file_path": info.get("file_path"),
+        "state": info.get("state"),
     }
 
 

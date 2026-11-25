@@ -1,0 +1,59 @@
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+backend/.env
+# Environment files
+.env
+backend/.env
+
+# OS collector local output (not meant to be committed)
+os_monitor/events.jsonl
+venv/
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+
+# Node / React
+node_modules/
+frontend/node_modules/
+frontend/.env.local
+frontend/.env
+*.tsbuildinfo
+build/
+dist/
+agent/bin/
+
+# OS
+.DS_Store
+
+# Local test output - not meant for version control
+os_monitor/events.jsonl
+os_monitor/resource_metrics.jsonl
+os_monitor/filesystem_events.jsonl
+os_monitor/watched_folder/
+
+# Secrets, local credentials, and generated database dumps
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+*.sql.gz
+*.dump
+*.bak
+
+# Tooling and IDE caches
+.hallmark/
+.impeccable/
+.impeccable-cache/
+
+*.pid
+*.lnk

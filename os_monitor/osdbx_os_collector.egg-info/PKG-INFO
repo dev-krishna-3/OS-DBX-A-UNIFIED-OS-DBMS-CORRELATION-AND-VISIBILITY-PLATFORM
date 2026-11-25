@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: osdbx-os-collector
+Version: 1.0.0
+Summary: OS event collector and adapter for the OS-DBX platform
+Requires-Python: >=3.10
+Requires-Dist: psutil>=5.9
